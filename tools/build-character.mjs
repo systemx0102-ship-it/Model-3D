@@ -28,6 +28,7 @@ import { buildGroom } from './lib/groom.mjs';
 import { scalp as scalpInfo } from '../character/hairline.mjs';
 import { buildOutfit } from './lib/outfit.mjs';
 import { bakeFabricDetails } from './lib/fabric.mjs';
+import { buildLods } from './lib/lods.mjs';
 import { buildOvershirt, bakeFlannel } from './lib/overshirt.mjs';
 import { bakeGarment, writeGarmentSet, boundaryField, tankShader, pantsShader, bootShader } from './lib/clothbake.mjs';
 import { recipe } from '../character/recipe.mjs';
@@ -493,6 +494,15 @@ for (const gm of [outfit.tank, outfit.pants, outfit.boots]) gm.tangents = comput
   pb.joints = new Uint16Array(n * 4).map((_, i) => (i % 4 === 0 ? rig.byName.get('pouch_r').index : 0));
   pb.weights = new Float32Array(n * 4).map((_, i) => (i % 4 === 0 ? 1 : 0));
 }
+function LODS_SUMMARY(l) {
+  let t0 = 0;
+  const t = [0, 0, 0];
+  for (const m of Object.values(l.meshes)) {
+    t0 += m.lod0 / 3;
+    m.levels.forEach((x, i) => (t[i] += x ? x.count / 3 : 0));
+  }
+  return [t0, ...t].map((x, i) => `LOD${i} ${Math.round(x / 1000)}k tris`).join(', ');
+}
 /** Weld key by identical position (closes UV seams for normal computation). */
 function positionWeld(pos) {
   const map = new Map();
@@ -656,9 +666,12 @@ g.addMesh({ name: 'SK_Buckle', ...outfit.belt.buckle, material: M.metal });
 g.addMesh({ name: 'SK_Pouch', ...outfit.belt.pouch, material: M.pouch });
 g.addMesh({ name: 'SK_ShirtTie', ...shirt.tie, normals: computeNormals(shirt.tie.positions, shirt.tie.indices, positionWeld(shirt.tie.positions)), material: M.flannel });
 fs.writeFileSync(path.join(OUT, 'hero.glb'), await g.write());
+const lods = await buildLods(path.join(OUT, 'hero.glb'), OUT);
+log(`LODs: runtime index buffers (${LODS_SUMMARY(lods)}) + ${lods.engineFiles.join(', ')}`);
 
 const sidecar = {
   name: recipe.name,
+  lods,
   height,
   units: 'meters',
   up: '+Y',

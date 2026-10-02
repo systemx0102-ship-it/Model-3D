@@ -5,9 +5,10 @@ import { EXPRESSIONS } from '../anim/face.js';
 import { skinGlobals } from '../render/skin.js';
 
 export function createPanel(app) {
-  const { stage, character, animator, shirt, hair, hairSim, views, setView, mode, setSimRate, toggleColliders, wind } = app;
+  const { stage, character, animator, shirt, hair, hairSim, lod, views, setView, mode, setSimRate, toggleColliders, wind } = app;
   const gui = new GUI({ title: 'Hero character' });
   gui.domElement.style.setProperty('--width', '270px');
+  if (innerWidth < 640) gui.close(); // phones: start collapsed so the character stays visible
 
   const state = {
     control: mode.autopilot ? 'Demo tour' : 'Keyboard',
@@ -27,6 +28,9 @@ export function createPanel(app) {
     outfit: { tank: true, pants: true, boots: true, shirt: true, belt: true, hair: true },
     fps: 0,
     physicsMs: 0,
+    lod: 'auto',
+    lodNow: 0,
+    triangles: 0,
   };
 
   const ctl = gui.addFolder('Control');
@@ -36,6 +40,7 @@ export function createPanel(app) {
   });
   ctl.add(state, 'timeScale', 0.05, 1, 0.05).name('time scale').onChange((v) => (app.timeScale = v));
   ctl.add(state, 'view', Object.keys(views)).name('camera').onChange((v) => setView(v));
+  if (lod) ctl.add(state, 'lod', ['auto', '0', '1', '2', '3']).name('level of detail').onChange((v) => (lod.forced = v === 'auto' ? null : +v));
 
   const face = gui.addFolder('Face');
   face.add(state, 'expression', Object.keys(EXPRESSIONS)).onChange((v) => animator.face.setExpression(v, state.intensity));
@@ -76,6 +81,10 @@ export function createPanel(app) {
   const stats = gui.addFolder('Stats');
   stats.add(state, 'fps').listen().disable();
   stats.add(state, 'physicsMs').name('physics ms/frame').listen().disable();
+  if (lod) {
+    stats.add(state, 'lodNow').name('LOD').listen().disable();
+    stats.add(state, 'triangles').name('mesh triangles').listen().disable();
+  }
 
   const help = document.createElement('div');
   help.className = 'help';
@@ -91,6 +100,7 @@ export function createPanel(app) {
       if (acc > 0.5) {
         state.fps = Math.round(frames / acc);
         state.physicsMs = +physicsMs.toFixed(2);
+        if (lod) (state.lodNow = lod.level), (state.triangles = Math.round(lod.triangles));
         frames = 0;
         acc = 0;
       }

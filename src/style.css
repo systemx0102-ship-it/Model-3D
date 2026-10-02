@@ -1,9 +1,9 @@
 :root { color-scheme: dark; --bg: #0d0f12; --fg: #e8e6e3; --muted: #9aa0a6; --panel: rgba(18, 20, 24, 0.82); --accent: #d9a35b; }
 html, body { margin: 0; height: 100%; background: var(--bg); color: var(--fg); font: 13px/1.4 system-ui, sans-serif; overflow: hidden; }
 #view { position: fixed; inset: 0; width: 100%; height: 100%; display: block; }
-#ui { position: fixed; left: 16px; bottom: 16px; padding: 6px 10px; background: var(--panel); border-radius: 6px; color: var(--fg); font-size: 13px; pointer-events: none; }
+#ui { position: fixed; left: 16px; bottom: calc(16px + env(safe-area-inset-bottom, 0px)); padding: 6px 10px; background: var(--panel); border-radius: 6px; color: var(--fg); font-size: 13px; pointer-events: none; }
 #ui:empty { display: none; }
-.help { position: fixed; left: 16px; top: 16px; max-width: min(520px, calc(100vw - 32px)); padding: 6px 10px; background: var(--panel); border-radius: 6px; color: var(--muted); font-size: 12px; pointer-events: none; transition: opacity 0.3s; }
+.help { position: fixed; left: 16px; top: calc(16px + env(safe-area-inset-top, 0px)); max-width: min(520px, calc(100vw - 32px)); padding: 6px 10px; background: var(--panel); border-radius: 6px; color: var(--muted); font-size: 12px; pointer-events: none; transition: opacity 0.3s; }
 .help b { color: var(--fg); font-weight: 600; }
-.lil-gui.root { position: fixed; top: 12px; right: 12px; max-height: calc(100vh - 24px); overflow: auto; }
+.lil-gui.root { position: fixed; top: calc(12px + env(safe-area-inset-top, 0px)); right: 12px; max-height: calc(100% - 24px - env(safe-area-inset-top, 0px)); overflow: auto; }
 @media (max-width: 640px) { .lil-gui.root { --width: 220px !important; } .help { display: none; } }

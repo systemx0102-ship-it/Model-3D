@@ -6,6 +6,7 @@ import { HairSim } from './character/hairsim.js';
 import { HairStrands } from './render/hair.js';
 import { BodyColliders } from './character/colliders.js';
 import { Overshirt } from './character/overshirt.js';
+import { LodManager } from './character/lod.js';
 import { Terrain } from './anim/terrain.js';
 import { Animator } from './anim/animator.js';
 import { KeyboardInput, Tour, SPEEDS } from './input.js';
@@ -63,6 +64,8 @@ const hair = new HairStrands(hairSim, {
   tipColor: new THREE.Color(0.075, 0.045, 0.024),
 });
 scene.add(hair.mesh);
+const lod = await LodManager.load('character/', character, hair);
+if (lod && params.has('lod')) lod.forced = +params.get('lod');
 const shirt = character.meta.overshirt && character.flannel ? new Overshirt(character, character.meta.overshirt, character.flannel) : null;
 if (shirt) scene.add(shirt.group);
 let colliderView = null;
@@ -168,7 +171,7 @@ const toggleColliders = (on) => {
 };
 const panel = params.has('still') || params.get('ui') === '0'
   ? null
-  : createPanel({ stage, character, animator, shirt, hair, hairSim, views: VIEWS, view, setView, mode, setSimRate, toggleColliders, wind, get timeScale() { return app.timeScale; }, set timeScale(v) { app.timeScale = v; } });
+  : createPanel({ stage, character, animator, shirt, hair, hairSim, lod, views: VIEWS, view, setView, mode, setSimRate, toggleColliders, wind, get timeScale() { return app.timeScale; }, set timeScale(v) { app.timeScale = v; } });
 
 let frames = 0;
 function frame() {
@@ -179,6 +182,7 @@ function frame() {
   step(dt, true);
   panel?.tick(realDt, physicsMs);
   controls.update();
+  lod?.update(camera, animator.loco.pos.clone().setY(animator.loco.groundY + 0.9));
   hair.update(simTime, wind, camera, stage.renderer.domElement.height);
   if (colliderView?.visible) colliderView.update();
   const hud = document.getElementById('ui');
@@ -190,5 +194,35 @@ function frame() {
     if (params.has('still')) stage.renderer.setAnimationLoop(null);
   }
 }
-window.__dbg = { hairSim, hair, character, colliders, stage, animator, shirt, setSimRate };
+// test hook: advance the simulation deterministically without rendering and read back its state
+window.__sim = {
+  advance(dt, n) {
+    for (let i = 0; i < n; i++) step(dt, false, true);
+    return this.snapshot();
+  },
+  snapshot() {
+    const v = new THREE.Vector3();
+    const P = (name) => character.bone(name).getWorldPosition(v).toArray();
+    const finite = (a) => a.every(Number.isFinite);
+    const sample = (arr, stride) => Array.from({ length: Math.floor(arr.length / 3 / stride) }, (_, i) => [arr[i * stride * 3], arr[i * stride * 3 + 1], arr[i * stride * 3 + 2]]);
+    const loco = animator.loco;
+    return {
+      time: simTime,
+      root: loco.pos.toArray(),
+      groundY: loco.groundY,
+      ankleH: loco.ankleH,
+      feet: Object.fromEntries(['l', 'r'].map((k) => [k, { ankle: P(`foot_${k}`), planted: loco.grounded && !loco.feet[k].swing, ground: loco.terrain.height(...[P(`foot_${k}`)[0], P(`foot_${k}`)[2]]) }])),
+      pelvis: P('pelvis'),
+      head: P('head'),
+      hair: sample(hairSim.sim.pos, 97),
+      cloth: shirt ? sample(shirt.sim.pos, 11) : [],
+      finite: finite(hairSim.sim.pos) && (!shirt || finite(shirt.sim.pos)) && character.skeleton.bones.every((b) => finite(b.matrixWorld.elements)),
+      clothStrain: shirt ? shirt.sim.maxStrain() : 0,
+    };
+  },
+  setWind(x, z) {
+    wind.set(x, 0, z);
+  },
+};
+window.__dbg = { hairSim, hair, character, colliders, stage, animator, shirt, setSimRate, lod };
 stage.renderer.setAnimationLoop(frame);

@@ -2,6 +2,7 @@
 // with a rubber sole, leather belt with buckle and a hip pouch. Region rules use rig landmarks so
 // they follow any body shape produced by the recipe.
 import * as THREE from 'three';
+import { mergeVertices } from 'three/addons/utils/BufferGeometryUtils.js';
 import { growGarment, solidify, garmentWeights, smoothedRegion } from './garments.mjs';
 import { buildBoot } from './boots.mjs';
 
@@ -287,9 +288,8 @@ function buckleFrame(c, height, width = 0.05, r = 0.0028) {
     for (const a of arrays) (out.set(a, o), (o += a.length));
     merged.setAttribute(key, new THREE.BufferAttribute(out, key === 'uv' ? 2 : 3));
   }
-  merged.setIndex([...Array(merged.attributes.position.count).keys()]);
   merged.translate(c.x, c.y, c.z);
-  return fromGeometry(merged);
+  return fromGeometry(mergeVertices(merged, 1e-6));
 }
 
 function roundedBox(c, s, outward) {
