@@ -55,8 +55,9 @@ export function smoothDamp(cur, target, vel, smoothTime, dt) {
 const wrapAngle = (a) => Math.atan2(Math.sin(a), Math.cos(a));
 
 export class Locomotion {
-  constructor(rig, terrain) {
+  constructor(rig, terrain, { sole = 0 } = {}) {
     this.rig = rig;
+    this.sole = sole; // boot sole thickness: the whole body stands this much higher
     this.terrain = terrain;
     this.pos = new THREE.Vector3(0, terrain.height(0, 0), 0);
     this.yaw = 0;
@@ -94,9 +95,9 @@ export class Locomotion {
     // heel / ball pivots relative to the ankle in the flat-foot frame (CS units)
     const ankle = rig.bone('foot_l').userData.bindCSPos;
     const ball = rig.bone('ball_l').userData.bindCSPos;
-    this.ankleH = ankle.y;
-    this.heelPivot = new THREE.Vector3(0, -ankle.y, -0.045); // heel contact below/behind the ankle
-    this.ballPivot = new THREE.Vector3(0, ball.y - ankle.y - 0.01, ball.z - ankle.z);
+    this.ankleH = ankle.y + sole;
+    this.heelPivot = new THREE.Vector3(0, -ankle.y - sole, -0.045); // heel contact below/behind the ankle
+    this.ballPivot = new THREE.Vector3(0, ball.y - ankle.y - 0.01 - sole, ball.z - ankle.z);
   }
 
   forward(out = new THREE.Vector3()) {
@@ -373,7 +374,7 @@ export class Locomotion {
     // `pos` is the ground projection of the pelvis (centre of mass); the skeleton origin sits
     // mid-foot, ahead of the hips, so offset the placement by the bind-pose pelvis depth.
     const pz = rig.bone('pelvis').userData.bindCSPos.z;
-    obj.position.set(this.pos.x - Math.sin(this.yaw) * pz, this.groundY, this.pos.z - Math.cos(this.yaw) * pz);
+    obj.position.set(this.pos.x - Math.sin(this.yaw) * pz, this.groundY + this.sole, this.pos.z - Math.cos(this.yaw) * pz);
     obj.rotation.set(0, this.yaw, 0);
     rig.resetPose();
     const gw = this.gaitWeight;

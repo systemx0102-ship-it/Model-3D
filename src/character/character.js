@@ -62,6 +62,7 @@ export class Character {
     micro.wrapS = micro.wrapT = THREE.RepeatWrapping;
 
     this.eyes = [];
+    this.garments = {};
     for (const mesh of this.meshes) {
       const ex = mesh.material.userData ?? {};
       switch (ex.shader) {
@@ -106,6 +107,24 @@ export class Character {
           );
           mesh.material.envMapIntensity = 0.12;
           mesh.castShadow = brow;
+          break;
+        }
+        case 'cloth': {
+          const old = mesh.material;
+          const fabric = ex.fabric;
+          const soft = fabric === 'rib' || fabric === 'twill' || fabric === 'cordura';
+          mesh.material = new THREE.MeshPhysicalMaterial({
+            color: old.color,
+            roughness: old.roughness,
+            metalness: 0,
+            sheen: soft ? 0.6 : 0.1,
+            sheenRoughness: 0.6,
+            sheenColor: old.color.clone().lerp(new THREE.Color(1, 1, 1), 0.35),
+            clearcoat: fabric === 'leather' ? 0.25 : 0,
+            clearcoatRoughness: 0.5,
+          });
+          mesh.material.userData = ex;
+          this.garments[mesh.name.replace('SK_', '')] = mesh;
           break;
         }
         default:

@@ -57,6 +57,7 @@ export function skinLUT(size = 128) {
 export const skinGlobals = {
   flush: { value: 0 }, // whole-body exertion flush 0..1
   blush: { value: 0 }, // face-only emotional blush 0..1
+  garments: { value: new THREE.Vector4(1, 1, 1, 0) }, // which garments are worn (hides covered skin)
 };
 
 /**
@@ -91,16 +92,22 @@ export function createSkinMaterial(maps, { metresPerUV = 1, isHead = false, wrin
     flush: skinGlobals.flush,
     blush: skinGlobals.blush,
     isHead: { value: isHead ? 1 : 0 },
+    garments: skinGlobals.garments,
   };
   mat.userData.uniforms = uniforms;
   mat.customProgramCacheKey = () => `skin-${isHead && maps.wrinkleNormal ? 'w' : 'n'}`;
   mat.onBeforeCompile = (shader) => {
     Object.assign(shader.uniforms, uniforms);
     if (isHead && maps.wrinkleNormal) shader.defines = { ...(shader.defines ?? {}), SKIN_WRINKLES: '' };
+    shader.vertexShader = shader.vertexShader
+      .replace('#include <common>', '#include <common>\nattribute vec4 _mask;\nvarying vec4 vMask;')
+      .replace('#include <begin_vertex>', '#include <begin_vertex>\nvMask = _mask;');
     let fs = shader.fragmentShader;
     fs = fs.replace(
       '#include <common>',
       `#include <common>
+varying vec4 vMask;
+uniform vec4 garments;
 uniform sampler2D skinLUT, skinData, microNormal, wrinkleNormal, wrinkleMask;
 uniform float microScale, microStrength, flush, blush, isHead;
 uniform vec4 wrinkleWeights;
@@ -113,7 +120,8 @@ vec3 skinUnshadowed;  // light colour before shadowing (per light)
     // sample skin data once, tint for blood flow after the albedo is known
     fs = fs.replace(
       '#include <map_fragment>',
-      `#include <map_fragment>
+      `if ( dot( vMask, garments ) > 0.995 ) discard; // skin fully covered by a worn garment
+#include <map_fragment>
 skinSample = texture2D( skinData, vMapUv );
 {
   float f = clamp( flush * skinSample.a + blush * skinSample.a * isHead, 0.0, 1.0 );

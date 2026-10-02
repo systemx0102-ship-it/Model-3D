@@ -32,7 +32,7 @@ export class Animator {
   constructor(character, terrain, { seed = 7 } = {}) {
     this.character = character;
     this.rig = new Rig(character);
-    this.loco = new Locomotion(this.rig, terrain);
+    this.loco = new Locomotion(this.rig, terrain, { sole: character.meta.outfit?.sole ?? 0 });
     const rng = mulberry(seed);
     this.idle = new IdleLayer(rng);
     this.face = new FaceController(character.meta, rng);

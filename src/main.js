@@ -26,6 +26,11 @@ const VIEWS = {
   eyefront: [[0.03, 1.666, 0.3], [0.03, 1.666, 0.04], 12],
   mouth: [[0.0, 1.57, 0.32], [0, 1.565, 0.08], 22],
   hand: [[0.45, 0.95, 0.55], [0.3, 0.85, 0.1], 25],
+  feet: [[0.5, 0.35, 0.9], [0.05, 0.12, 0.05], 28],
+  feetside: [[0.75, 0.1, 0.12], [0.08, 0.07, 0.06], 22],
+  torso: [[0.35, 1.25, 1.2], [0, 1.15, 0], 30],
+  waist: [[0.0, 1.05, 0.6], [0, 1.0, 0], 30],
+  waistside: [[0.5, 1.02, 0.05], [0, 1.0, 0.02], 22],
   back: [[0, 1.0, -4.2], [0, 0.95, 0], 30],
   side: [[4.2, 0.95, 0], [0, 0.85, 0], 30],
   game: [[1.6, 1.9, -3.4], [0, 1.1, 0], 45],
@@ -94,7 +99,7 @@ let simTime = 0;
 let last = performance.now();
 const fixedDt = params.has('fps') ? 1 / +params.get('fps') : null;
 const camOffset = new THREE.Vector3();
-function step(dt, render) {
+function step(dt, render, simHair = true) {
   simTime += dt;
   let input;
   if (scripted) input = scriptedInput(simTime);
@@ -107,7 +112,7 @@ function step(dt, render) {
   else input.lookAt = new THREE.Vector3(0.4, 1.55, 3).add(animator.loco.pos);
   // follow camera: keep the orbit offset, track the character smoothly
   const focus = animator.loco.pos.clone().setY(animator.loco.groundY + 0.85);
-  if (!['face', 'face34', 'profile', 'eye', 'eyefront', 'mouth', 'hand'].includes(view)) {
+  if (!['face', 'face34', 'profile', 'eye', 'eyefront', 'mouth', 'hand', 'feet', 'feetside', 'torso', 'waist', 'waistside'].includes(view)) {
     camOffset.copy(camera.position).sub(controls.target);
     controls.target.lerp(focus, render ? 1 - Math.exp(-dt / 0.15) : 1);
     camera.position.copy(controls.target).add(camOffset);
@@ -117,13 +122,13 @@ function step(dt, render) {
   character.root.updateMatrixWorld(true);
   for (const e of character.eyes) e.mesh.material.userData.uniforms.pupil.value = animator.face.pupilOut ?? 0.33;
   character.updateMaterials();
-  hairSim.update(dt, character.bone('head').matrixWorld.elements, colliders.world(), wind.toArray());
+  if (simHair) hairSim.update(dt, character.bone('head').matrixWorld.elements, colliders.world(), wind.toArray());
   stage.followFocus(animator.loco.pos.clone().setY(animator.loco.groundY + 1.2));
 }
 
 // headless capture: deterministic pre-roll (simulated seconds) before the first rendered frame
 const preroll = +(params.get('t') ?? 0);
-for (let t = 0; t < preroll; t += 1 / 60) step(1 / 60, false);
+for (let t = 0; t < preroll; t += 1 / 60) step(1 / 60, false, t > preroll - 2.5);
 
 let frames = 0;
 function frame() {

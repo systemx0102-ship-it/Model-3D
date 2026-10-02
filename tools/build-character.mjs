@@ -26,6 +26,7 @@ import { bakeMicroNormal } from './lib/micro.mjs';
 import { fitColliders, bindPoseColliders } from './lib/colliders.mjs';
 import { buildGroom } from './lib/groom.mjs';
 import { scalp as scalpInfo } from '../character/hairline.mjs';
+import { buildOutfit } from './lib/outfit.mjs';
 import { recipe } from '../character/recipe.mjs';
 
 const args = process.argv.slice(2);
@@ -424,6 +425,97 @@ const babyHair = strandMesh(groom.baby);
   };
 }
 
+// 10c. Outfit ---------------------------------------------------------------------------------
+const bodySet = new TriangleSet(world, bodyTris);
+const outfit = buildOutfit({ rig, world, normals: restNormals, faces: bodyFaces, uvs: packed.uvs, tileOfVt: packed.tileOfVt, perVertex, bodySet, dominant, bodyTris });
+{
+  // pouch hangs from its own bone so engines can drive it with a spring (AnimDynamics etc.)
+  const a = outfit.belt.pouchAnchor;
+  const pelvisB = rig.byName.get('pelvis');
+  const pouchBone = { name: 'pouch_r', parent: 'pelvis', head: a.clone(), tail: a.clone().add(new THREE.Vector3(0, -0.1, 0)), role: 'accessory', world: new THREE.Matrix4().makeBasis(new THREE.Vector3(1, 0, 0), new THREE.Vector3(0, -1, 0), new THREE.Vector3(0, 0, -1)).setPosition(a) };
+  pouchBone.index = rig.bones.length;
+  pouchBone.parentIndex = pelvisB.index;
+  rig.bones.push(pouchBone);
+  rig.byName.set('pouch_r', pouchBone);
+}
+const locals2 = localBind(rig);
+locals.length = 0;
+locals.push(...locals2);
+// transfer breathing to the garments that cover the torso
+function garmentMorphs(gm, names) {
+  const n = gm.positions.length / 3;
+  const res = [];
+  for (const name of names) {
+    const d = new Float32Array(n * 3);
+    let any = false;
+    for (let i = 0; i < n; i++) {
+      const sv = gm.shell.srcIdx[gm.shellVertex[i]];
+      for (let k = 0; k < 3; k++) {
+        const x = shapes[name][sv * 3 + k];
+        if (Math.abs(x) > 1e-5) (d[i * 3 + k] = x), (any = true);
+      }
+    }
+    if (any) res.push({ name, position: d });
+  }
+  return res;
+}
+outfit.tank.morphs = garmentMorphs(outfit.tank, ['breatheChest', 'breatheBelly']);
+outfit.pants.morphs = garmentMorphs(outfit.pants, ['breatheBelly']);
+outfit.boots.normals = computeNormals(outfit.boots.positions, outfit.boots.indices, Int32Array.from({ length: outfit.boots.positions.length / 3 }, (_, k) => k));
+for (const gm of [outfit.tank, outfit.pants, outfit.boots]) gm.tangents = computeTangents(gm.positions, gm.normals, gm.uvs, gm.indices);
+// belt / buckle weights from the nearest trouser shell vertex
+{
+  const sp = outfit.pants.shell;
+  const pantW = garmentWeightsLookup(outfit.pants);
+  for (const part of [outfit.belt, outfit.belt.buckle]) {
+    const n = part.positions.length / 3;
+    part.joints = new Uint16Array(n * 4);
+    part.weights = new Float32Array(n * 4);
+    for (let i = 0; i < n; i++) {
+      let best = 0, bd = Infinity;
+      for (let j = 0; j < sp.srcIdx.length; j++) {
+        const d = (sp.pos[j * 3] - part.positions[i * 3]) ** 2 + (sp.pos[j * 3 + 1] - part.positions[i * 3 + 1]) ** 2 + (sp.pos[j * 3 + 2] - part.positions[i * 3 + 2]) ** 2;
+        if (d < bd) (bd = d), (best = j);
+      }
+      part.joints.set(pantW.joints.subarray(best * 4, best * 4 + 4), i * 4);
+      part.weights.set(pantW.weights.subarray(best * 4, best * 4 + 4), i * 4);
+    }
+  }
+  const pb = outfit.belt.pouch;
+  const n = pb.positions.length / 3;
+  pb.joints = new Uint16Array(n * 4).map((_, i) => (i % 4 === 0 ? rig.byName.get('pouch_r').index : 0));
+  pb.weights = new Float32Array(n * 4).map((_, i) => (i % 4 === 0 ? 1 : 0));
+}
+function garmentWeightsLookup(gm) {
+  // per shell vertex weights (outer layer render vertices map 1:1 to shell vertices)
+  const n = gm.shell.srcIdx.length;
+  return { joints: gm.joints.subarray(0, n * 4), weights: gm.weights.subarray(0, n * 4) };
+}
+// body coverage masks (skin hidden under garments; one ring inside each hem stays visible)
+const coverage = {};
+coverage.boots = outfit.boots.covered;
+for (const [key, gm] of [['tank', outfit.tank], ['pants', outfit.pants]]) {
+  const sh = gm.shell;
+  const keep = new Set();
+  sh.srcIdx.forEach((v, i) => {
+    if (sh.onBoundary[i]) return;
+    if (sh.adj[i].some((j) => sh.onBoundary[j])) return;
+    keep.add(v);
+  });
+  coverage[key] = keep;
+}
+for (const m of bodyParts) {
+  const n = m.src.length;
+  const mask = new Float32Array(n * 4);
+  m.src.forEach((v, i) => {
+    mask[i * 4] = coverage.tank.has(v) ? 1 : 0;
+    mask[i * 4 + 1] = coverage.pants.has(v) ? 1 : 0;
+    mask[i * 4 + 2] = coverage.boots.has(v) ? 1 : 0;
+  });
+  m.custom = { _MASK: { array: mask, type: 'VEC4' } };
+}
+log(`outfit: tank ${outfit.tank.indices.length / 3} tris, trousers ${outfit.pants.indices.length / 3}, boots ${outfit.boots.indices.length / 3} (pivot clearance ${(outfit.boots.pivotClearance * 1000).toFixed(1)} mm), belt + pouch`);
+
 // Skin textures -------------------------------------------------------------------------
 const TEXDIR = path.join(OUT, 'textures');
 fs.mkdirSync(TEXDIR, { recursive: true });
@@ -498,6 +590,13 @@ const M = {
   gum: g.material('M_Gums', { color: [0.78, 0.36, 0.38, 1], roughness: 0.35, extras: { shader: 'mouth' } }),
   tongue: g.material('M_Tongue', { color: [0.72, 0.36, 0.38, 1], roughness: 0.4, extras: { shader: 'mouth' } }),
   lash: g.material('M_Eyelashes', { color: [0.04, 0.03, 0.025, 1], roughness: 0.5, alphaMode: 'MASK', alphaCutoff: 0.3, doubleSided: true, extras: { shader: 'strand' } }),
+  tank: g.material('M_Cloth_Tank', { color: [0.2, 0.22, 0.17, 1], roughness: 0.85, extras: { shader: 'cloth', fabric: 'rib' } }),
+  pants: g.material('M_Cloth_Pants', { color: [0.33, 0.29, 0.21, 1], roughness: 0.82, extras: { shader: 'cloth', fabric: 'twill' } }),
+  boots: g.material('M_Leather_Boots', { color: [0.16, 0.09, 0.05, 1], roughness: 0.5, extras: { shader: 'cloth', fabric: 'leather' } }),
+  sole: g.material('M_Rubber_Sole', { color: [0.05, 0.045, 0.04, 1], roughness: 0.75, extras: { shader: 'cloth', fabric: 'rubber' } }),
+  belt: g.material('M_Leather_Belt', { color: [0.12, 0.07, 0.04, 1], roughness: 0.45, extras: { shader: 'cloth', fabric: 'leather' } }),
+  metal: g.material('M_Metal_Buckle', { color: [0.55, 0.53, 0.5, 1], roughness: 0.32, metallic: 1, extras: { shader: 'metal' } }),
+  pouch: g.material('M_Cloth_Pouch', { color: [0.18, 0.19, 0.15, 1], roughness: 0.8, extras: { shader: 'cloth', fabric: 'cordura' } }),
   baby: g.material('M_BabyHair', { color: [0.06, 0.04, 0.025, 1], roughness: 0.6, alphaMode: 'MASK', alphaCutoff: 0.3, doubleSided: true, extras: { shader: 'strand' } }),
   brow: g.material('M_Eyebrows', { color: [0.11, 0.075, 0.05, 1], roughness: 0.55, alphaMode: 'MASK', alphaCutoff: 0.3, doubleSided: true, extras: { shader: 'strand' } }),
 };
@@ -514,6 +613,13 @@ g.addMesh({ name: 'SK_Tongue', ...tongue, material: M.tongue });
 g.addMesh({ name: 'SK_Eyelashes', ...lashes, material: M.lash });
 g.addMesh({ name: 'SK_Eyebrows', ...brows, material: M.brow });
 g.addMesh({ name: 'SK_BabyHair', ...babyHair, material: M.baby });
+g.addMesh({ ...outfit.tank, name: 'SK_Tank', material: M.tank });
+g.addMesh({ ...outfit.pants, name: 'SK_Pants', material: M.pants });
+g.addMesh({ ...outfit.boots, name: 'SK_Boots', material: M.boots });
+outfit.soles.forEach((so, i) => g.addMesh({ name: `SK_Sole_${i ? 'r' : 'l'}`, ...so, normals: computeNormals(so.positions, so.indices, Int32Array.from({ length: so.positions.length / 3 }, (_, k) => k)), material: M.sole }));
+g.addMesh({ name: 'SK_Belt', ...outfit.belt, material: M.belt });
+g.addMesh({ name: 'SK_Buckle', ...outfit.belt.buckle, material: M.metal });
+g.addMesh({ name: 'SK_Pouch', ...outfit.belt.pouch, material: M.pouch });
 fs.writeFileSync(path.join(OUT, 'hero.glb'), await g.write());
 
 const sidecar = {
@@ -527,6 +633,8 @@ const sidecar = {
   bones: rig.bones.map((b) => ({ name: b.name, parent: b.parent, role: b.role, head: b.head.toArray(), tail: b.tail.toArray() })),
   textures: textureFiles,
   hair: hairMeta,
+  outfit: { sole: +(-Math.min(...outfit.soles.map((so) => so.bottomY))).toFixed(4), // body lift so the soles stand on the ground
+    garments: ['Tank', 'Pants', 'Boots'], mask: { Tank: 0, Pants: 1, Boots: 2 } },
   // eye rotation (radians) that each ARKit eyeLook* shape was authored with (lids follow gaze)
   eyeLook: Object.fromEntries([['up', 'eyeLookUpLeft'], ['down', 'eyeLookDownLeft'], ['in', 'eyeLookInLeft'], ['out', 'eyeLookOutLeft']].map(([k, n]) => [k, +(2 * Math.acos(Math.min(1, Math.abs(eyeRot[n].l.w)))).toFixed(4)])),
   colliders: colliders.map(({ world: _w, ...c }) => c),

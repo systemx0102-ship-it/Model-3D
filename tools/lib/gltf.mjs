@@ -77,6 +77,7 @@ export class CharacterGltf {
     if (mesh.uvs1) prim.setAttribute('TEXCOORD_1', this.acc(mesh.uvs1, 'VEC2'));
     if (mesh.tangents) prim.setAttribute('TANGENT', this.acc(mesh.tangents, 'VEC4'));
     if (mesh.colors) prim.setAttribute('COLOR_0', this.acc(mesh.colors, 'VEC4'));
+    for (const [name, a] of Object.entries(mesh.custom ?? {})) prim.setAttribute(name, this.acc(a.array, a.type));
     if (mesh.joints) {
       prim.setAttribute('JOINTS_0', this.acc(mesh.joints, 'VEC4'));
       prim.setAttribute('WEIGHTS_0', this.acc(mesh.weights, 'VEC4'));
