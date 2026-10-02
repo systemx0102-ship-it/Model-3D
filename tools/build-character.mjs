@@ -18,7 +18,21 @@ import { buildDentition } from './lib/teeth.mjs';
 import { TriangleSet, bindGroup, boundDeltas, bindWeights } from './lib/binding.mjs';
 import { eyelashes, eyebrows } from './lib/facehair.mjs';
 import { ribbons, rng } from './lib/ribbons.mjs';
+import { regionMasks, vertexLighting, bakeTile, writeTile } from './lib/bakeset.mjs';
+import { V, VCOUNT } from './lib/skinbake.mjs';
+import { skinContext } from './lib/landmarks.mjs';
+import { bakeEye } from './lib/eyebake.mjs';
+import { bakeMicroNormal } from './lib/micro.mjs';
 import { recipe } from '../character/recipe.mjs';
+
+const args = process.argv.slice(2);
+const opt = (name, def) => {
+  const i = args.indexOf(`--${name}`);
+  return i < 0 ? def : args[i + 1] && !args[i + 1].startsWith('--') ? args[i + 1] : true;
+};
+const TEX = +opt('tex', 2048);
+const FORMATS = opt('png', false) ? ['png', 'webp'] : ['webp'];
+const SKIP_TEX = !!opt('notex', false);
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const root = path.resolve(here, '..');
@@ -140,6 +154,8 @@ log(`baked ${shapeNames.length} blendshapes`);
     }
   log(`lid/eyeball conformity: corrected ${fixed} posed lid vertices`);
 }
+// Rest lip seal: MakeHuman's neutral mouth is parted ~1 mm; a relaxed closed mouth is sealed.
+for (const v of bodyVerts) for (let k = 0; k < 3; k++) world[v * 3 + k] += 0.45 * shapes.mouthClose[v * 3 + k];
 
 // Full-body smooth normals per source vertex (so tile seams shade continuously).
 const bodyTris = triangulate(bodyFaces.map((f) => f.v));
@@ -186,6 +202,17 @@ const bodyParts = tiles.map((faces, tile) => {
   m.morphs = morphsBySrc(m.src);
   m.tile = tile;
   return m;
+});
+// metres of surface per UV unit, per tile (drives the micro-normal tiling in the shader)
+const metresPerUV = bodyParts.map((m) => {
+  let s3 = 0, s2 = 0;
+  for (let i = 0; i < m.indices.length; i += 3)
+    for (let k = 0; k < 3; k++) {
+      const a = m.indices[i + k], b = m.indices[i + ((k + 1) % 3)];
+      s3 += Math.hypot(m.positions[a * 3] - m.positions[b * 3], m.positions[a * 3 + 1] - m.positions[b * 3 + 1], m.positions[a * 3 + 2] - m.positions[b * 3 + 2]);
+      s2 += Math.hypot(m.uvs[a * 2] - m.uvs[b * 2], m.uvs[a * 2 + 1] - m.uvs[b * 2 + 1]);
+    }
+  return s3 / s2;
 });
 const bb = bounds(world.filter((_, i) => bodyVerts.has((i / 3) | 0)));
 const height = bb.max[1] - bb.min[1];
@@ -281,8 +308,31 @@ function rigidMesh(geom, bone, morphSource) {
 }
 // small rest offsets so ~1.5 mm of upper incisor shows when the lips part, tongue rests low
 const offset = (geom, dx, dy, dz) => { for (let i = 0; i < geom.positions.length; i += 3) (geom.positions[i] += dx), (geom.positions[i + 1] += dy), (geom.positions[i + 2] += dz); };
-offset(dent.upper, 0, -0.0012, 0);
-offset(dent.gum_upper, 0, -0.0012, 0);
+offset(dent.upper, 0, -0.0012, -0.0012);
+offset(dent.gum_upper, 0, -0.0012, -0.0012);
+offset(dent.lower, 0, 0, -0.0012);
+offset(dent.gum_lower, 0, 0, -0.0012);
+// vertex colour: enamel shade from cervical (warmer) to incisal edge (greyer, translucent),
+// darkened toward the back of the mouth (cavity occlusion)
+const mouthFront = Math.max(...dent.upper.positions.filter((_, i) => i % 3 === 2));
+const occl = (z) => 0.3 + 0.7 * THREE.MathUtils.smoothstep(z, mouthFront - 0.042, mouthFront - 0.004);
+function shadeVerts(geom, fn) {
+  const n = geom.positions.length / 3;
+  geom.colors = new Float32Array(n * 4);
+  for (let i = 0; i < n; i++) {
+    const c = fn(i, geom.uvs ? geom.uvs[i * 2 + 1] : 0);
+    const o = occl(geom.positions[i * 3 + 2]);
+    geom.colors.set([c[0] * o, c[1] * o, c[2] * o, 1], i * 4);
+  }
+}
+const enamel = (i, v) => {
+  const t = THREE.MathUtils.smoothstep(v, 0.05, 0.55), e = THREE.MathUtils.smoothstep(v, 0.82, 1.0);
+  return [0.8 + 0.1 * t - 0.08 * e, 0.69 + 0.17 * t - 0.04 * e, 0.5 + 0.27 * t + 0.03 * e];
+};
+shadeVerts(dent.upper, enamel);
+shadeVerts(dent.lower, enamel);
+shadeVerts(dent.gum_upper, () => [0.72, 0.3, 0.32]);
+shadeVerts(dent.gum_lower, () => [0.72, 0.3, 0.32]);
 const teethUpper = rigidMesh(dent.upper, 'head');
 const teethLower = rigidMesh(dent.lower, 'head', rigid.lowerTeeth);
 const gumUpper = rigidMesh(dent.gum_upper, 'head');
@@ -294,6 +344,7 @@ tongue.indices = triangulate(tongue.polys);
 tongue.normals = computeNormals(tongue.positions, tongue.indices, tongue.src);
 Object.assign(tongue, packWeights(perVertex, tongue.src, rig));
 tongue.morphs = morphsBySrc(tongue.src).map((m) => ({ name: m.name, position: m.position }));
+shadeVerts(tongue, () => [0.62, 0.26, 0.27]);
 
 // 10. Eyelashes and eyebrows ---------------------------------------------------------------
 function strandMesh(strands) {
@@ -317,11 +368,75 @@ const lashes = strandMesh(lashStrands);
 const brows = strandMesh(browStrands);
 log(`face hair: ${lashStrands.length} lashes, ${browStrands.length} brow hairs`);
 
+// Skin textures -------------------------------------------------------------------------
+const TEXDIR = path.join(OUT, 'textures');
+fs.mkdirSync(TEXDIR, { recursive: true });
+const textureFiles = {};
+if (!SKIP_TEX) {
+  const nV = world.length / 3;
+  const vattr = regionMasks(MH, nV);
+  const adjacency = new Map();
+  for (const f of bodyFaces)
+    for (let i = 0; i < f.v.length; i++) {
+      const a = f.v[i], b = f.v[(i + 1) % f.v.length];
+      (adjacency.get(a) ?? adjacency.set(a, new Set()).get(a)).add(b);
+      (adjacency.get(b) ?? adjacency.set(b, new Set()).get(b)).add(a);
+    }
+  const lit = vertexLighting(world, restNormals, bodyTris, bodyVerts, adjacency);
+  const headVerts = new Set(packed.parts.head.faces.concat(packed.parts.mouth.faces, ...packed.parts.sockets.map((s) => s.faces)).flatMap((f) => f.v));
+  for (let v = 0; v < nV; v++) {
+    vattr[v * VCOUNT + V.AO] = lit.ao[v];
+    vattr[v * VCOUNT + V.THICK] = lit.thick[v];
+    vattr[v * VCOUNT + V.CURV] = Math.abs(lit.curv[v]);
+    vattr[v * VCOUNT + V.HEAD] = headVerts.has(v) ? 1 : 0;
+    vattr[v * VCOUNT + V.BROW] = 0;
+  }
+  // brow follicle density from the actual brow strand roots (Gaussian splat, sigma 1.6 mm)
+  const headList = [...headVerts];
+  let maxD = 0;
+  for (const st of browStrands) {
+    const r = st.root;
+    for (const v of headList) {
+      const d2 = (world[v * 3] - r.x) ** 2 + (world[v * 3 + 1] - r.y) ** 2 + (world[v * 3 + 2] - r.z) ** 2;
+      if (d2 < 0.000025) vattr[v * VCOUNT + V.BROW] += Math.exp(-d2 / (2 * 0.0016 ** 2));
+    }
+  }
+  for (const v of headList) maxD = Math.max(maxD, vattr[v * VCOUNT + V.BROW]);
+  for (const v of headList) vattr[v * VCOUNT + V.BROW] = Math.min(1, vattr[v * VCOUNT + V.BROW] / (maxD * 0.6));
+  // lash line: dark band where the lashes emerge (sigma 0.8 mm), stored in the NAVEL channel's slot
+  for (const v of headList) vattr[v * VCOUNT + V.NAVEL] = 0;
+  for (const st of lashStrands) {
+    const r = st.root;
+    for (const v of headList) {
+      const d2 = (world[v * 3] - r.x) ** 2 + (world[v * 3 + 1] - r.y) ** 2 + (world[v * 3 + 2] - r.z) ** 2;
+      if (d2 < 0.000009) vattr[v * VCOUNT + V.NAVEL] = Math.max(vattr[v * VCOUNT + V.NAVEL], Math.exp(-d2 / (2 * 0.0009 ** 2)) * (st.kind === 'upper' ? 1 : 0.5));
+    }
+  }
+  log(`vertex AO / thickness / curvature traced for ${bodyVerts.size} vertices`);
+  const ctx = skinContext({ rig, eyes, world, bodyVerts, skinTone: recipe.skin.tone, lipTone: recipe.skin.lips });
+  const regionOfFace = new Map();
+  for (const f of packed.parts.mouth.faces) regionOfFace.set(f, 1);
+  for (const sck of packed.parts.sockets) for (const f of sck.faces) regionOfFace.set(f, 2);
+  for (const m of bodyParts) {
+    const faces = tiles[m.tile];
+    m.region = new Int8Array(m.indices.length / 3);
+    let t = 0;
+    faces.forEach((f) => {
+      for (let k = 0; k < f.v.length - 2; k++) m.region[t++] = regionOfFace.get(f) ?? 0;
+    });
+    const set = bakeTile(m, TEX, vattr, ctx, { head: m.tile === TILE.HEAD });
+    textureFiles[TILE_NAMES[m.tile]] = await writeTile(set, TEXDIR, TILE_NAMES[m.tile], { formats: FORMATS });
+    log(`baked ${TILE_NAMES[m.tile]} texture set at ${TEX}px`);
+  }
+  textureFiles.Eye = { BaseColor: await bakeEye(TEXDIR, Math.min(TEX, 1024), FORMATS) };
+  textureFiles.Micro = { Normal: await bakeMicroNormal(TEXDIR, 1024, FORMATS) };
+}
+
 // 11. Write --------------------------------------------------------------------------------
 const g = new CharacterGltf(recipe.name);
 g.addSkeleton(rig, locals);
 const M = {
-  skin: TILE_NAMES.map((t) => g.material(`M_Skin_${t}`, { color: [0.8, 0.62, 0.53, 1], roughness: 0.5, extras: { shader: 'skin', tile: t } })),
+  skin: TILE_NAMES.map((t, i) => g.material(`M_Skin_${t}`, { color: [0.8, 0.62, 0.53, 1], roughness: 0.5, extras: { shader: 'skin', tile: t, metresPerUV: metresPerUV[i] } })),
   eye: g.material('M_Eye', { color: [1, 1, 1, 1], roughness: 0.05, extras: { shader: 'eye', ...EYE } }),
   tear: g.material('M_Tearline', { color: [1, 1, 1, 0.0], roughness: 0.02, alphaMode: 'BLEND', extras: { shader: 'tearline' } }),
   teeth: g.material('M_Teeth', { color: [0.93, 0.9, 0.82, 1], roughness: 0.22, extras: { shader: 'teeth' } }),
@@ -351,8 +466,10 @@ const sidecar = {
   up: '+Y',
   forward: '+Z',
   blendshapes: shapeNames,
-  eyes: Object.fromEntries(Object.entries(eyes).map(([s, e]) => [s, { center: e.center.toArray(), radius: e.R, ...EYE }])),
+  eyes: Object.fromEntries(Object.entries(eyes).map(([s, e]) => [s, { center: e.center.toArray(), gaze: e.gaze.toArray(), radius: e.R, ...EYE }])),
   bones: rig.bones.map((b) => ({ name: b.name, parent: b.parent, role: b.role, head: b.head.toArray(), tail: b.tail.toArray() })),
+  textures: textureFiles,
+  textureSize: TEX,
   recipe: { macro: recipe.macro, targets: applied },
 };
 fs.writeFileSync(path.join(OUT, 'character.json'), JSON.stringify(sidecar, null, 1));

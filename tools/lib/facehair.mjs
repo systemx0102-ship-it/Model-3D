@@ -149,7 +149,7 @@ export function eyebrows(eyeCenter, side, raycastSkin, rng) {
     }
     strands.push({
       points: pts,
-      width: (t) => lerp(0.00008, 0.000025, t),
+      width: (t) => lerp(0.00013, 0.00004, t),
       side: new THREE.Vector3().crossVectors(n, dir).normalize(),
       normal: n,
       seed: rng(),

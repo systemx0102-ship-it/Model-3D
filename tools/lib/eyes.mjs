@@ -67,7 +67,7 @@ export function eyeballMesh(frame, R, rings = 48, segs = 64) {
         p.copy(d).multiplyScalar(r);
         n.copy(d);
       }
-      uv.push(0.5 + (0.5 * p.x) / R, 0.5 + (0.5 * p.y) / R);
+      uv.push(0.5 + (0.5 * p.x) / R, 0.5 - (0.5 * p.y) / R); // image top = eye top
       const wp = p.clone().applyMatrix4(frame);
       const wn = n.clone().applyMatrix3(nrmMat).normalize();
       pos.push(wp.x, wp.y, wp.z);

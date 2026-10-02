@@ -64,6 +64,11 @@ export const recipe = {
     ['asym/asymm-breast-1-l', 0.2],
     ['asym/asymm-trunk-1-r', 0.15],
   ],
+  // Skin: linear albedo (sRGB ~ #C8967F light-medium warm) and lip colour (sRGB ~ #B26668).
+  skin: {
+    tone: [0.578, 0.305, 0.212],
+    lips: [0.44, 0.134, 0.138],
+  },
   // World scale: MakeHuman units are decimetres.
   unitScale: 0.1,
 };

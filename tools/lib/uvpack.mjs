@@ -3,6 +3,7 @@
 //   1 BODY  – torso / arms / legs island
 //   2 LIMBS – hands and feet (high texel density for fingers and nails)
 // Islands are moved and uniformly scaled only, so the authored UV flow is preserved.
+// Output UVs use the glTF convention (v = 0 at the top of the image).
 
 export const TILE = { HEAD: 0, BODY: 1, LIMBS: 2 };
 export const TILE_NAMES = ['Head', 'Body', 'Limbs'];
@@ -73,7 +74,7 @@ export function repack(faces, uvs, positions) {
     I.tile = tile; I.scale = s;
     for (const t of I.vts) {
       out[t * 2] = (uvs[t * 2] - I.min[0]) * s + ox;
-      out[t * 2 + 1] = (uvs[t * 2 + 1] - I.min[1]) * s + oy;
+      out[t * 2 + 1] = 1 - ((uvs[t * 2 + 1] - I.min[1]) * s + oy); // glTF convention: v = 0 at the top
       tileOfVt[t] = tile;
     }
   };
