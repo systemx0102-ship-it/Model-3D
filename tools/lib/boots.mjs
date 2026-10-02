@@ -151,42 +151,67 @@ export function buildBoot({ side, rig, last, footTri, trousers, perVertexWeights
   const apexO = end.c.clone().addScaledVector(fwd, toeLen + end.e + thickness);
   const apexI = end.c.clone().addScaledVector(fwd, toeLen + end.e);
 
-  // assemble: outer rings, outer apex, inner rings, inner apex, collar rim
-  const R = outerRings.length;
-  const pos = [], uv = [], layer = [], idx = [];
-  const push = (p, u, v, l) => (pos.push(p.x, p.y, p.z), uv.push(u, v), layer.push(l), pos.length / 3 - 1);
+  // assemble: outer rings, outer apex, inner rings, inner apex, collar rim. Columns start at the
+  // back/underside (UV seam hidden behind the heel and under the sole) and run to a duplicated
+  // closing column; the front/top line (lacing) sits at u = 0.5.
+  const R = outerRings.length, C = SEG + 1;
+  const col = (j) => (j + SEG / 2) % SEG;
+  const pos = [], uv = [], layer = [], idx = [], weld = [], st = [];
+  const push = (p, u, v, l, key) => {
+    const i = pos.length / 3;
+    pos.push(p.x, p.y, p.z), uv.push(u, v), layer.push(l), weld.push(key ?? i);
+    return i;
+  };
   // v follows arc length along the centres so the leather texture does not stretch
   const cen = [...planes.map((P) => P.c), ...outerRings.slice(planes.length).map((r) => r.reduce((s, p) => s.add(p), new THREE.Vector3()).multiplyScalar(1 / SEG)), apexO];
   const arc = [0];
   for (let i = 1; i < cen.length; i++) arc.push(arc[i - 1] + cen[i].distanceTo(cen[i - 1]));
   const vOf = (i) => arc[i] / arc.at(-1);
+  // surface coordinates for the texture bake: s = signed arc around the ring from the front line,
+  // t = arc length down each column from the collar
+  const sOf = outerRings.map((ring) => {
+    const out = new Array(C).fill(0);
+    for (let j = SEG / 2 + 1; j < C; j++) out[j] = out[j - 1] + ring[col(j)].distanceTo(ring[col(j - 1)]);
+    for (let j = SEG / 2 - 1; j >= 0; j--) out[j] = out[j + 1] - ring[col(j)].distanceTo(ring[col(j + 1)]);
+    return out;
+  });
+  const tOf = [new Array(C).fill(0)];
+  for (let i = 1; i < R; i++) tOf.push(tOf[i - 1].map((t, j) => t + outerRings[i][col(j)].distanceTo(outerRings[i - 1][col(j)])));
+  const tApex = tOf[R - 1].reduce((a, t) => a + t, 0) / C + apexO.distanceTo(cen[R - 1]);
   const wall = (rings, apex, l) => {
     const base = pos.length / 3;
-    rings.forEach((ring, i) => ring.forEach((p, k) => push(p, k / SEG, vOf(i), l)));
+    rings.forEach((ring, i) => {
+      for (let j = 0; j < C; j++) {
+        push(ring[col(j)], j / SEG, vOf(i), l, j === SEG ? base + i * C : undefined);
+        st.push(sOf[i][j], tOf[i][j]);
+      }
+    });
     const ap = push(apex, 0.5, 1, l);
+    st.push(0, tApex);
     const flip = l === 1;
     for (let i = 0; i < R - 1; i++)
-      for (let k = 0; k < SEG; k++) {
-        const a = base + i * SEG + k, b = base + i * SEG + ((k + 1) % SEG), c = a + SEG, d = b + SEG;
+      for (let j = 0; j < SEG; j++) {
+        const a = base + i * C + j, b = a + 1, c = a + C, d = b + C;
         if (flip) idx.push(a, b, c, b, d, c);
         else idx.push(a, c, b, b, c, d);
       }
-    for (let k = 0; k < SEG; k++) {
-      const a = base + (R - 1) * SEG + k, b = base + (R - 1) * SEG + ((k + 1) % SEG);
+    for (let j = 0; j < SEG; j++) {
+      const a = base + (R - 1) * C + j, b = a + 1;
       if (flip) idx.push(a, b, ap);
       else idx.push(a, ap, b);
     }
     return base;
   };
   const oBase = wall(outerRings, apexO, 0);
-  const iBase = wall(innerRings, apexI, 1);
-  for (let k = 0; k < SEG; k++) {
-    const a = push(outerRings[0][k], k / SEG, 0, 2), b = push(innerRings[0][k], k / SEG, 0.02, 3);
-    void a, b;
+  wall(innerRings, apexI, 1);
+  const rim = pos.length / 3;
+  for (let j = 0; j < C; j++) {
+    push(outerRings[0][col(j)], j / SEG, 0, 2, j === SEG ? rim : undefined);
+    push(innerRings[0][col(j)], j / SEG, 0.02, 3, j === SEG ? rim + 1 : undefined);
+    st.push(sOf[0][j], 0, sOf[0][j], -0.003);
   }
-  const rim = pos.length / 3 - SEG * 2;
-  for (let k = 0; k < SEG; k++) {
-    const a = rim + k * 2, b = rim + ((k + 1) % SEG) * 2;
+  for (let j = 0; j < SEG; j++) {
+    const a = rim + j * 2, b = a + 2;
     idx.push(a, b, a + 1, b, b + 1, a + 1);
   }
   const positions = Float32Array.from(pos);
@@ -197,12 +222,11 @@ export function buildBoot({ side, rig, last, footTri, trousers, perVertexWeights
     let s = 0;
     for (let t = 0; t < (R - 1) * SEG * 6; t += 3) {
       a.fromArray(positions, indices[t] * 3); b.fromArray(positions, indices[t + 1] * 3); c.fromArray(positions, indices[t + 2] * 3);
-      const ring = Math.floor((indices[t] - oBase) / SEG);
+      const ring = Math.floor((indices[t] - oBase) / C);
       s += b.clone().sub(a).cross(c.clone().sub(a)).dot(a.clone().sub(cen[Math.min(ring, cen.length - 1)]));
     }
     if (s < 0) for (let t = 0; t < indices.length; t += 3) [indices[t + 1], indices[t + 2]] = [indices[t + 2], indices[t + 1]];
   }
-  void iBase;
   // skin weights: nearest foot/leg vertex of the body
   const n = positions.length / 3;
   const joints = new Uint16Array(n * 4), weights = new Float32Array(n * 4);
@@ -217,7 +241,17 @@ export function buildBoot({ side, rig, last, footTri, trousers, perVertexWeights
     joints.set(w.J, i * 4);
     weights.set(w.W, i * 4);
   }
-  return { positions, uvs: Float32Array.from(uv), indices, layer: Uint8Array.from(layer), joints, weights, topY: top, pivotClearance: minClear };
+  const footStart = planes.findIndex((P) => P.phase === 2);
+  const front = outerRings.map((ring, i) => {
+    const p = ring[0]; // k = 0: the front / top line
+    return { t: tOf[i][SEG / 2], a: p.clone().sub(ankle).dot(fwd), c: p.y - floor, o: p.clone().sub(ankle).dot(new THREE.Vector3(fwd.z, 0, -fwd.x)) };
+  });
+  return {
+    positions, uvs: Float32Array.from(uv), indices, layer: Uint8Array.from(layer), joints, weights, weld: Int32Array.from(weld), st: Float32Array.from(st),
+    topY: top, pivotClearance: minClear,
+    // landmarks for the texture bake (bind pose)
+    marks: { side, ankle, fwd, tip, floor, front, tFoot: tOf[footStart][SEG / 2], tToe: tOf[planes.length - 1][SEG / 2], tEnd: tApex },
+  };
 }
 
 /** Radii (evenly spaced angles around a centre) pushed out to the section's convex hull. */

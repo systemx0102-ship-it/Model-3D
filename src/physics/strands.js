@@ -282,13 +282,13 @@ function norm(v) {
 export function xform(m, x, y, z) {
   return [m[0] * x + m[4] * y + m[8] * z + m[12], m[1] * x + m[5] * y + m[9] * z + m[13], m[2] * x + m[6] * y + m[10] * z + m[14]];
 }
-function mulMat(a, b) {
+export function mulMat(a, b) {
   const o = new Array(16);
   for (let c = 0; c < 4; c++)
     for (let r = 0; r < 4; r++) o[c * 4 + r] = a[r] * b[c * 4] + a[4 + r] * b[c * 4 + 1] + a[8 + r] * b[c * 4 + 2] + a[12 + r] * b[c * 4 + 3];
   return o;
 }
-function invRigid(m) {
+export function invRigid(m) {
   // inverse of a rotation+translation (uniform scale assumed 1)
   const o = [m[0], m[4], m[8], 0, m[1], m[5], m[9], 0, m[2], m[6], m[10], 0, 0, 0, 0, 1];
   o[12] = -(o[0] * m[12] + o[4] * m[13] + o[8] * m[14]);

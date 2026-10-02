@@ -5,6 +5,7 @@ import { Character } from './character/character.js';
 import { HairSim } from './character/hairsim.js';
 import { HairStrands } from './render/hair.js';
 import { BodyColliders } from './character/colliders.js';
+import { Overshirt } from './character/overshirt.js';
 import { Terrain } from './anim/terrain.js';
 import { Animator } from './anim/animator.js';
 import { KeyboardInput, Tour, SPEEDS } from './input.js';
@@ -60,10 +61,12 @@ const hair = new HairStrands(hairSim, {
   tipColor: new THREE.Color(0.075, 0.045, 0.024),
 });
 scene.add(hair.mesh);
+const shirt = character.meta.overshirt && character.flannel ? new Overshirt(character, character.meta.overshirt, character.flannel) : null;
+if (shirt) scene.add(shirt.group);
 let colliderView = null;
 if (params.has('colliders')) scene.add((colliderView = colliders.helpers()));
 for (const [k, v] of (params.get('morph') ?? '').split(',').filter(Boolean).map((t) => t.split(':'))) character.weights[k] = +v;
-if (params.has('hide')) for (const n of params.get('hide').split(',')) character.root.traverse((o) => { if (o.name.startsWith(n)) o.visible = false; });
+if (params.has('hide')) for (const n of params.get('hide').split(',')) scene.traverse((o) => { if (o.name.startsWith(n)) o.visible = false; });
 
 // held prop for combat mode (compact flashlight)
 const prop = new THREE.Group();
@@ -122,7 +125,11 @@ function step(dt, render, simHair = true) {
   character.root.updateMatrixWorld(true);
   for (const e of character.eyes) e.mesh.material.userData.uniforms.pupil.value = animator.face.pupilOut ?? 0.33;
   character.updateMaterials();
-  if (simHair) hairSim.update(dt, character.bone('head').matrixWorld.elements, colliders.world(), wind.toArray());
+  if (simHair) {
+    const cw = colliders.world();
+    hairSim.update(dt, character.bone('head').matrixWorld.elements, cw.filter((c) => !c.name.startsWith('pelvis_')), wind.toArray());
+    shirt?.update(dt, cw, animator.loco.groundY, wind.toArray());
+  }
   stage.followFocus(animator.loco.pos.clone().setY(animator.loco.groundY + 1.2));
 }
 
@@ -148,5 +155,5 @@ function frame() {
     if (params.has('still')) stage.renderer.setAnimationLoop(null);
   }
 }
-window.__dbg = { hairSim, hair, character, colliders, stage, animator };
+window.__dbg = { hairSim, hair, character, colliders, stage, animator, shirt };
 stage.renderer.setAnimationLoop(frame);

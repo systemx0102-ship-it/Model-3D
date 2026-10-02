@@ -5,6 +5,13 @@ import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { createSkinMaterial } from '../render/skin.js';
 import { createEyeMaterial, updateEyeUniforms } from '../render/eye.js';
 import { createStrandMaterial, createTeethMaterial, createMouthMaterial, createTearlineMaterial } from '../render/materials.js';
+import { createClothMaterial, createFlannelMaterial } from '../render/cloth.js';
+
+const SHEEN = {
+  rib: new THREE.Color(0.2, 0.22, 0.17),
+  twill: new THREE.Color(0.36, 0.32, 0.24),
+  cordura: new THREE.Color(0.16, 0.17, 0.13),
+};
 
 export class Character {
   static async load(base = 'character/', { maxAnisotropy = 8 } = {}) {
@@ -51,6 +58,15 @@ export class Character {
       t.anisotropy = maxAnisotropy;
       if (srgb) t.colorSpace = THREE.SRGBColorSpace;
       return t;
+    };
+    const fabricCache = {};
+    const fabricDetail = (name) => {
+      if (!fabricCache[name]) {
+        const t = tex(`T_Fabric_${name[0].toUpperCase()}${name.slice(1)}_Detail.webp`);
+        t.wrapS = t.wrapT = THREE.RepeatWrapping;
+        fabricCache[name] = t;
+      }
+      return fabricCache[name];
     };
     const texSet = (tile) => ({
       baseColor: tex(`T_${tile}_BaseColor.webp`, true),
@@ -112,21 +128,23 @@ export class Character {
         case 'cloth': {
           const old = mesh.material;
           const fabric = ex.fabric;
-          const soft = fabric === 'rib' || fabric === 'twill' || fabric === 'cordura';
-          mesh.material = new THREE.MeshPhysicalMaterial({
+          const maps = { detail: fabricDetail(fabric) };
+          if (ex.maps) Object.assign(maps, { baseColor: tex(`T_${ex.maps}_BaseColor.webp`, true), normal: tex(`T_${ex.maps}_Normal.webp`), orm: tex(`T_${ex.maps}_ORM.webp`) });
+          mesh.material = createClothMaterial(maps, {
+            fabric,
             color: old.color,
             roughness: old.roughness,
-            metalness: 0,
-            sheen: soft ? 0.6 : 0.1,
-            sheenRoughness: 0.6,
-            sheenColor: old.color.clone().lerp(new THREE.Color(1, 1, 1), 0.35),
-            clearcoat: fabric === 'leather' ? 0.25 : 0,
-            clearcoatRoughness: 0.5,
+            tileSize: meta.textures?.Fabric?.[fabric]?.size,
+            sheenColor: SHEEN[fabric],
           });
-          mesh.material.userData = ex;
-          this.garments[mesh.name.replace('SK_', '')] = mesh;
+          mesh.material.userData = { ...ex, ...mesh.material.userData };
+          if (/^SK_(Tank|Pants|Boots)$/.test(mesh.name)) this.garments[mesh.name.replace('SK_', '')] = mesh;
           break;
         }
+        case 'flannel':
+          this.flannel ??= createFlannelMaterial(tex('T_Flannel_BaseColor.webp', true), tex('T_Flannel_Normal.webp'));
+          mesh.material = this.flannel;
+          break;
         default:
           break;
       }

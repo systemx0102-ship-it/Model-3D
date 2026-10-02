@@ -84,6 +84,25 @@ export function fitColliders({ rig, world, verts, dominant, eyes, scalpVerts, bo
     surfaceSphere(`trapezius_${x}`, new THREE.Vector3(x, topY + 0.25, -0.02), new THREE.Vector3(0, -1, 0), 0.045);
   for (let i = 0; i < 2; i++)
     for (const x of [-0.1, -0.035, 0.035, 0.1]) surfaceSphere(`chest_${i}_${x}`, new THREE.Vector3(x, topY - 0.04 - i * 0.06, 0.6), new THREE.Vector3(0, 0, -1), 0.06);
+  // hips / seat / belly: spheres tangent to the skin, found by rays cast from inside the pelvis
+  // outward (the first hit is the skin itself, never a hanging arm). Used by waist-hung cloth.
+  const insideSphere = (name, origin, dir, r) => {
+    ray.set(origin, dir);
+    ray.far = 0.4;
+    const hit = ray.intersectObject(mesh, false)[0];
+    if (!hit) return;
+    out.push({ name, type: 'sphere', bone: dominant(nearestVert(hit.point)), a: hit.point.clone().addScaledVector(dir, -r), r });
+  };
+  const pc = B('pelvis').head, hipY = B('thigh_l').head.y;
+  for (const [i, dy] of [[0, 0.09], [1, 0.045], [2, 0.0]])
+    for (let k = 0; k < 12; k++) {
+      const a = (k / 12) * Math.PI * 2;
+      insideSphere(`pelvis_${i}_${k}`, new THREE.Vector3(0, hipY + dy, pc.z - 0.01), new THREE.Vector3(Math.sin(a), 0, Math.cos(a)), 0.06);
+    }
+  for (const sx of [1, -1])
+    for (const [j, dy] of [[0, -0.04], [1, -0.08]])
+      for (const a of [Math.PI * 0.8, Math.PI, Math.PI * 1.2])
+        insideSphere(`pelvis_seat_${sx}_${j}_${a.toFixed(2)}`, new THREE.Vector3(sx * 0.075, hipY + dy, pc.z - 0.02), new THREE.Vector3(Math.sin(a) * sx, 0, Math.cos(a)), 0.055);
   for (const s of ['l', 'r']) {
     sphere(`breast_${s}`, `breast_${s}`, B(`breast_${s}`).head.clone(), pick([`breast_${s}`]), 0.85);
     sphere(`shoulder_${s}`, `upperarm_${s}`, B(`upperarm_${s}`).head.clone(), pick([`clavicle_${s}`, `upperarm_${s}`, `upperarm_twist_01_${s}`], (p) => p.distanceTo(B(`upperarm_${s}`).head) < 0.08), 0.8);

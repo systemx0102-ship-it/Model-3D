@@ -238,7 +238,7 @@ function buildBelt(pants, rig) {
     }
   // buckle: frame at the front centre
   const front = ring.reduce((a, p) => (p.z > a.z ? p : a));
-  const buckle = box(new THREE.Vector3(front.x, front.y - H / 2 + 0.004 - drop, front.z + 0.007), new THREE.Vector3(0.05, 0.042, 0.006));
+  const buckle = buckleFrame(new THREE.Vector3(front.x, front.y - H / 2 + 0.004 - drop, front.z + 0.0085), H + 0.008);
   // pouch on the right hip, slightly behind the side
   const hipR = ring.reduce((a, p) => {
     const ang = Math.atan2(p.x - cen.x, p.z - cen.z);
@@ -247,22 +247,49 @@ function buildBelt(pants, rig) {
   const outR = hipR.clone().sub(cen).setY(0).normalize();
   const pouchCenter = hipR.clone().addScaledVector(outR, 0.028).add(new THREE.Vector3(0, -0.055 - drop, 0));
   const pouch = roundedBox(pouchCenter, new THREE.Vector3(0.11, 0.12, 0.045), outR);
-  return { positions: Float32Array.from(pos), normals: Float32Array.from(nrm), uvs: Float32Array.from(uv), indices: Uint32Array.from(idx), buckle, pouch, pouchAnchor: hipR.clone().addScaledVector(outR, 0.01).add(new THREE.Vector3(0, -drop, 0)), center: cen };
+  return { positions: Float32Array.from(pos), normals: Float32Array.from(nrm), uvs: Float32Array.from(uv), indices: Uint32Array.from(idx), buckle, pouch, pouchAnchor: hipR.clone().addScaledVector(outR, 0.01).add(new THREE.Vector3(0, -drop, 0)), center: cen, ring, bottomY: cen.y - H - drop };
 }
 
 function mergeParts(parts, name) {
-  const pos = [], uv = [], idx = [], layer = [], joints = [], weights = [];
+  const pos = [], uv = [], idx = [], layer = [], joints = [], weights = [], weld = [], st = [];
   for (const p of parts) {
     const base = pos.length / 3;
-    pos.push(...p.positions); uv.push(...p.uvs); layer.push(...p.layer); joints.push(...p.joints); weights.push(...p.weights);
+    pos.push(...p.positions); uv.push(...p.uvs); layer.push(...p.layer); joints.push(...p.joints); weights.push(...p.weights); st.push(...p.st);
+    weld.push(...Array.from(p.weld, (i) => i + base));
     idx.push(...Array.from(p.indices, (i) => i + base));
   }
-  return { name, positions: Float32Array.from(pos), uvs: Float32Array.from(uv), indices: Uint32Array.from(idx), layer: Uint8Array.from(layer), joints: Uint16Array.from(joints), weights: Float32Array.from(weights) };
+  return {
+    name, positions: Float32Array.from(pos), uvs: Float32Array.from(uv), indices: Uint32Array.from(idx), layer: Uint8Array.from(layer),
+    joints: Uint16Array.from(joints), weights: Float32Array.from(weights), weld: Int32Array.from(weld), st: Float32Array.from(st),
+    marks: Object.fromEntries(parts.map((p) => [p.marks.side, p.marks])),
+  };
 }
 
-function box(c, s) {
-  const g = new THREE.BoxGeometry(s.x, s.y, s.z, 1, 1, 1).translate(c.x, c.y, c.z);
-  return fromGeometry(g);
+/** Wire frame buckle (rounded rectangle tube), centre bar and prong, facing +Z. */
+function buckleFrame(c, height, width = 0.05, r = 0.0028) {
+  const hw = width / 2 - r, hh = height / 2 - r, cr = 0.008;
+  const pts = [];
+  const corners = [[hw - cr, hh - cr, 0], [-(hw - cr), hh - cr, Math.PI / 2], [-(hw - cr), -(hh - cr), Math.PI], [hw - cr, -(hh - cr), 1.5 * Math.PI]];
+  for (const [x, y, a0] of corners)
+    for (let k = 0; k <= 8; k++) {
+      const a = a0 + (k / 8) * (Math.PI / 2);
+      pts.push(new THREE.Vector3(x + Math.cos(a) * cr, y + Math.sin(a) * cr, 0));
+    }
+  const frame = new THREE.TubeGeometry(new THREE.CatmullRomCurve3(pts, true, 'centripetal'), 120, r, 12, true);
+  const bar = new THREE.CylinderGeometry(r * 0.85, r * 0.85, 2 * hh, 12).translate(-width * 0.12, 0, 0);
+  const prong = new THREE.CylinderGeometry(0.0014, 0.0011, hw + width * 0.12, 8).rotateZ(Math.PI / 2).translate((hw - width * 0.12) / 2, 0, r * 0.9);
+  const parts = [frame, bar, prong].map((g) => g.toNonIndexed());
+  const merged = new THREE.BufferGeometry();
+  for (const key of ['position', 'normal', 'uv']) {
+    const arrays = parts.map((g) => g.attributes[key].array);
+    const out = new Float32Array(arrays.reduce((n, a) => n + a.length, 0));
+    let o = 0;
+    for (const a of arrays) (out.set(a, o), (o += a.length));
+    merged.setAttribute(key, new THREE.BufferAttribute(out, key === 'uv' ? 2 : 3));
+  }
+  merged.setIndex([...Array(merged.attributes.position.count).keys()]);
+  merged.translate(c.x, c.y, c.z);
+  return fromGeometry(merged);
 }
 
 function roundedBox(c, s, outward) {
