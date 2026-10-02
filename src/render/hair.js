@@ -41,7 +41,7 @@ vec3 strandAt( float s ) {
   vec3 g0 = guideAt( aGuides.x, sg );
   vec3 p = g0 * aWeights.x + guideAt( aGuides.y, sg ) * aWeights.y + guideAt( aGuides.z, sg ) * aWeights.z;
   // clumping: pull toward the nearest guide toward the tips (locks), keep the root spread
-  float clump = aParams.z * smoothstep( 0.15, 1.0, s );
+  float clump = aParams.z * smoothstep( 0.3, 1.0, s );
   p = mix( p + aRoot, g0 + aRoot * 0.25, clump * 0.6 );
   return p;
 }

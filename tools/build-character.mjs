@@ -527,6 +527,8 @@ const sidecar = {
   bones: rig.bones.map((b) => ({ name: b.name, parent: b.parent, role: b.role, head: b.head.toArray(), tail: b.tail.toArray() })),
   textures: textureFiles,
   hair: hairMeta,
+  // eye rotation (radians) that each ARKit eyeLook* shape was authored with (lids follow gaze)
+  eyeLook: Object.fromEntries([['up', 'eyeLookUpLeft'], ['down', 'eyeLookDownLeft'], ['in', 'eyeLookInLeft'], ['out', 'eyeLookOutLeft']].map(([k, n]) => [k, +(2 * Math.acos(Math.min(1, Math.abs(eyeRot[n].l.w)))).toFixed(4)])),
   colliders: colliders.map(({ world: _w, ...c }) => c),
   textureSize: TEX,
   recipe: { macro: recipe.macro, targets: applied },
