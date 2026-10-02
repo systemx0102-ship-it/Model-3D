@@ -5,8 +5,8 @@ import * as THREE from 'three';
 
 export const EXPRESSIONS = {
   neutral: {},
-  subtleSmile: { mouthSmileLeft: 0.3, mouthSmileRight: 0.24, cheekSquintLeft: 0.12, cheekSquintRight: 0.09, eyeSquintLeft: 0.08, eyeSquintRight: 0.06, mouthDimpleLeft: 0.12 },
-  happy: { mouthSmileLeft: 0.72, mouthSmileRight: 0.66, cheekSquintLeft: 0.45, cheekSquintRight: 0.4, eyeSquintLeft: 0.28, eyeSquintRight: 0.24, mouthUpperUpLeft: 0.12, mouthUpperUpRight: 0.1, jawOpen: 0.1, mouthDimpleLeft: 0.25, mouthDimpleRight: 0.2, browInnerUp: 0.06 },
+  subtleSmile: { mouthSmileLeft: 0.5, mouthSmileRight: 0.4, cheekSquintLeft: 0.2, cheekSquintRight: 0.15, eyeSquintLeft: 0.12, eyeSquintRight: 0.09, mouthDimpleLeft: 0.2, mouthPressLeft: 0.08 },
+  happy: { mouthSmileLeft: 1.0, mouthSmileRight: 0.94, cheekSquintLeft: 0.62, cheekSquintRight: 0.56, eyeSquintLeft: 0.36, eyeSquintRight: 0.32, mouthUpperUpLeft: 0.32, mouthUpperUpRight: 0.28, mouthLowerDownLeft: 0.18, mouthLowerDownRight: 0.16, jawOpen: 0.16, mouthDimpleLeft: 0.3, mouthDimpleRight: 0.25, mouthStretchLeft: 0.12, mouthStretchRight: 0.1, browInnerUp: 0.08 },
   sad: { browInnerUp: 0.78, browDownLeft: 0.12, browDownRight: 0.15, mouthFrownLeft: 0.55, mouthFrownRight: 0.5, mouthShrugLower: 0.32, mouthPressLeft: 0.15, mouthPressRight: 0.12, eyeSquintLeft: 0.15, eyeSquintRight: 0.18, eyeLookDownLeft: 0.12, eyeLookDownRight: 0.12 },
   angry: { browDownLeft: 0.85, browDownRight: 0.8, eyeSquintLeft: 0.35, eyeSquintRight: 0.38, eyeWideLeft: 0.18, eyeWideRight: 0.15, noseSneerLeft: 0.35, noseSneerRight: 0.3, mouthPressLeft: 0.45, mouthPressRight: 0.4, jawForward: 0.12, mouthFrownLeft: 0.2, mouthFrownRight: 0.22 },
   surprised: { browInnerUp: 0.85, browOuterUpLeft: 0.78, browOuterUpRight: 0.82, eyeWideLeft: 0.75, eyeWideRight: 0.72, jawOpen: 0.38, mouthFunnel: 0.15 },

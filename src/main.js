@@ -9,6 +9,7 @@ import { Overshirt } from './character/overshirt.js';
 import { Terrain } from './anim/terrain.js';
 import { Animator } from './anim/animator.js';
 import { KeyboardInput, Tour, SPEEDS } from './input.js';
+import { createPanel } from './ui/panel.js';
 
 const params = new URLSearchParams(location.search);
 const stage = new Stage(document.getElementById('view'), { ao: !params.has('noao') });
@@ -36,8 +37,9 @@ const VIEWS = {
   side: [[4.2, 0.95, 0], [0, 0.85, 0], 30],
   game: [[1.6, 1.9, -3.4], [0, 1.1, 0], 45],
 };
-const view = params.get('view') ?? 'game';
+let view = params.get('view') ?? 'game';
 function setView(name) {
+  view = name;
   const [p, t, fov] = VIEWS[name] ?? VIEWS.full;
   camera.position.set(...p);
   controls.target.set(...t);
@@ -158,17 +160,28 @@ function step(dt, render, simHair = true) {
 const preroll = +(params.get('t') ?? 0);
 for (let t = 0; t < preroll; t += 1 / 60) step(1 / 60, false, t > preroll - 2.5);
 
+const app = { timeScale: 1 };
+const toggleColliders = (on) => {
+  if (on && !colliderView) scene.add((colliderView = colliders.helpers()));
+  if (colliderView) colliderView.visible = on;
+};
+const panel = params.has('still') || params.get('ui') === '0'
+  ? null
+  : createPanel({ stage, character, animator, shirt, hair, hairSim, views: VIEWS, view, setView, mode, setSimRate, toggleColliders, wind, get timeScale() { return app.timeScale; }, set timeScale(v) { app.timeScale = v; } });
+
 let frames = 0;
 function frame() {
   const now = performance.now();
-  const dt = fixedDt ?? Math.min(0.05, (now - last) / 1000);
+  const realDt = Math.min(0.05, (now - last) / 1000);
+  const dt = fixedDt ?? realDt * app.timeScale;
   last = now;
   step(dt, true);
+  panel?.tick(realDt, physicsMs);
   controls.update();
   hair.update(simTime, wind, camera, stage.renderer.domElement.height);
-  colliderView?.update();
+  if (colliderView?.visible) colliderView.update();
   const hud = document.getElementById('ui');
-  if (hud && mode.autopilot && !scripted) hud.textContent = tour.label;
+  if (hud && !scripted) hud.textContent = mode.autopilot ? tour.label : '';
   stage.render();
   frames++;
   if (frames === 3) {
