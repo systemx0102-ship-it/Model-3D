@@ -1,0 +1,6 @@
+node_modules/
+dist/
+.cache/
+*.log
+# High-resolution texture bakes are reproducible via `npm run build:character -- --tex 4096|8192`
+public/character/textures-hires/

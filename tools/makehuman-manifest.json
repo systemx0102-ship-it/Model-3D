@@ -1,0 +1,53 @@
+{
+  "repo": "makehumancommunity/makehuman",
+  "commit": "a8bc2d54ff0ac92e78ff71431b1023eda42bf482",
+  "root": "makehuman/data",
+  "files": [
+    "../../LICENSE.ASSETS.md",
+    "3dobjs/base.obj",
+    "rigs/default.mhskel",
+    "rigs/default_weights.mhw",
+    "poseunits/face-poseunits.bvh",
+    "poseunits/face-poseunits.json",
+    "macrodetails/caucasian-female-young.target",
+    "macrodetails/african-female-young.target",
+    "macrodetails/asian-female-young.target",
+    "macrodetails/universal-female-young-averagemuscle-averageweight.target",
+    "macrodetails/universal-female-young-averagemuscle-minweight.target",
+    "macrodetails/universal-female-young-maxmuscle-averageweight.target",
+    "macrodetails/universal-female-young-maxmuscle-minweight.target",
+    "macrodetails/height/female-young-averagemuscle-averageweight-maxheight.target",
+    "macrodetails/height/female-young-averagemuscle-minweight-maxheight.target",
+    "macrodetails/height/female-young-maxmuscle-averageweight-maxheight.target",
+    "macrodetails/height/female-young-maxmuscle-minweight-maxheight.target",
+    "macrodetails/proportions/female-young-averagemuscle-averageweight-idealproportions.target",
+    "macrodetails/proportions/female-young-averagemuscle-minweight-idealproportions.target",
+    "macrodetails/proportions/female-young-maxmuscle-averageweight-idealproportions.target",
+    "macrodetails/proportions/female-young-maxmuscle-minweight-idealproportions.target"
+  ],
+  "targetDirs": [
+    {
+      "dir": "breast",
+      "match": "^female-young-"
+    },
+    "asym",
+    "nose",
+    "mouth",
+    "chin",
+    "cheek",
+    "ears",
+    "eyebrows",
+    "forehead",
+    "head",
+    "eyes",
+    "neck",
+    "torso",
+    "stomach",
+    "hip",
+    "buttocks",
+    "armslegs",
+    "measure",
+    "pelvis",
+    "expression/units/caucasian"
+  ]
+}

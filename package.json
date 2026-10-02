@@ -1,0 +1,27 @@
+{
+  "name": "model-3d-hero-character",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Real-time hero female character: anatomical base mesh, UE5-compatible rig, ARKit facial blendshapes, strand hair and cloth physics, procedural animation.",
+  "type": "module",
+  "scripts": {
+    "vendor": "node tools/vendor-makehuman.mjs",
+    "build:character": "node tools/build-character.mjs",
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "test": "node --test test/"
+  },
+  "license": "MIT",
+  "dependencies": {
+    "three": "^0.186.1"
+  },
+  "devDependencies": {
+    "@gltf-transform/core": "^4.5.1",
+    "jpeg-js": "^0.4.4",
+    "meshoptimizer": "^1.3.0",
+    "playwright-core": "^1.63.0",
+    "pngjs": "^7.0.0",
+    "vite": "^8.3.2"
+  }
+}
