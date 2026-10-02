@@ -675,6 +675,13 @@ const sidecar = {
     bone: 'pelvis', W: shirt.W, H: shirt.H, dx: +shirt.dx.toFixed(5), lengths: shirt.lengths.map((l) => +l.toFixed(4)),
     rest: shirt.rest.flatMap((p) => p.toArray().map((x) => +x.toFixed(5))), uv: shirt.uv.map((x) => +x.toFixed(4)),
     pins: shirt.pins, tails: shirt.tails,
+    // extra obstacles carried by other bones (the hip pouch)
+    obstacles: [(() => {
+      const p = outfit.belt.pouch.positions;
+      const c = [0, 0, 0];
+      for (let i = 0; i < p.length; i += 3) (c[0] += p[i]), (c[1] += p[i + 1]), (c[2] += p[i + 2]);
+      return { bone: 'pouch_r', type: 'sphere', c: c.map((x) => +(x / (p.length / 3)).toFixed(4)), r: 0.045 };
+    })()],
   },
   // eye rotation (radians) that each ARKit eyeLook* shape was authored with (lids follow gaze)
   eyeLook: Object.fromEntries([['up', 'eyeLookUpLeft'], ['down', 'eyeLookDownLeft'], ['in', 'eyeLookInLeft'], ['out', 'eyeLookOutLeft']].map(([k, n]) => [k, +(2 * Math.acos(Math.min(1, Math.abs(eyeRot[n].l.w)))).toFixed(4)])),

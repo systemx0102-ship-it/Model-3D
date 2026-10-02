@@ -43,6 +43,14 @@ export class HairSim {
     this.enabled = true;
   }
 
+  /** Fixed simulation rate (Hz). Behaviour is preserved: per-step constants are converted. */
+  setRate(hz) {
+    this.sim.setDt(1 / hz);
+    const acc = this.clock.acc;
+    this.clock = new FixedStep(1 / hz);
+    this.clock.acc = Math.min(acc, 1 / hz);
+  }
+
   get G() {
     return this.meta.guides;
   }

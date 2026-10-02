@@ -33,6 +33,12 @@ export class Overshirt {
       pins: meta.pins,
     });
     this.clock = new FixedStep(this.sim.p.dt);
+    // obstacles on other bones (pouch): bone-local centres
+    this.obstacles = (meta.obstacles ?? []).map((o) => {
+      const b = character.bone(o.bone);
+      const bi = character.skeleton.boneInverses[character.skeleton.bones.indexOf(b)];
+      return { bone: b, local: new THREE.Vector3(...o.c).applyMatrix4(bi), r: o.r, name: `obstacle_${o.bone}` };
+    });
     this.prevPos = new Float32Array(this.sim.pos.length);
     this.renderPos = new Float32Array(this.sim.pos.length);
     this.prevAnchor = null;
@@ -45,9 +51,16 @@ export class Overshirt {
     this.group.add(this.panel.mesh, ...this.tails.map((t) => t.mesh));
   }
 
+  setRate(hz) {
+    this.sim.setDt(1 / hz);
+    const acc = this.clock.acc;
+    this.clock = new FixedStep(1 / hz);
+    this.clock.acc = Math.min(acc, 1 / hz);
+  }
+
   /** Bind-space collider filter: pelvis / legs / lower back / arms, inflated by the outer layers. */
   colliders(all) {
-    const out = [];
+    const out = this.obstacles.map((o) => ({ type: 'sphere', c: o.local.clone().applyMatrix4(o.bone.matrixWorld).toArray(), r: o.r, name: o.name }));
     for (const c of all)
       for (const [re, extra] of CLOTH_COLLIDERS)
         if (re.test(c.name)) {

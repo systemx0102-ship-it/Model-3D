@@ -98,6 +98,25 @@ function scriptedInput(t) {
   return { dir, speed: sp, jump: false, crouch: scripted === 'crouch', aim: scripted === 'aim', strafe: scripted === 'aim', faceYaw: loco.yaw, turnTo: scripted === 'turn' ? Math.PI : null, aimPitch: 0 };
 }
 
+// fixed simulation rate for hair and cloth: 120 Hz, or 60 Hz on slow machines (auto, or ?simhz=)
+let simHz = +(params.get('simhz') ?? 120);
+const setSimRate = (hz) => {
+  simHz = hz;
+  hairSim.setRate(hz);
+  shirt?.setRate(hz);
+};
+if (simHz !== 120) setSimRate(simHz);
+let physicsMs = 0, slowFor = 0;
+function physicsBudget(ms) {
+  physicsMs += (ms - physicsMs) * 0.05;
+  if (params.has('simhz') || simHz <= 60) return;
+  slowFor = physicsMs > 9 ? slowFor + 1 : 0;
+  if (slowFor > 120) {
+    setSimRate(60);
+    console.info('physics: falling back to a 60 Hz fixed step');
+  }
+}
+
 let simTime = 0;
 let last = performance.now();
 const fixedDt = params.has('fps') ? 1 / +params.get('fps') : null;
@@ -126,9 +145,11 @@ function step(dt, render, simHair = true) {
   for (const e of character.eyes) e.mesh.material.userData.uniforms.pupil.value = animator.face.pupilOut ?? 0.33;
   character.updateMaterials();
   if (simHair) {
+    const t0 = performance.now();
     const cw = colliders.world();
     hairSim.update(dt, character.bone('head').matrixWorld.elements, cw.filter((c) => !c.name.startsWith('pelvis_')), wind.toArray());
     shirt?.update(dt, cw, animator.loco.groundY, wind.toArray());
+    if (render) physicsBudget(performance.now() - t0);
   }
   stage.followFocus(animator.loco.pos.clone().setY(animator.loco.groundY + 1.2));
 }
@@ -155,5 +176,5 @@ function frame() {
     if (params.has('still')) stage.renderer.setAnimationLoop(null);
   }
 }
-window.__dbg = { hairSim, hair, character, colliders, stage, animator, shirt };
+window.__dbg = { hairSim, hair, character, colliders, stage, animator, shirt, setSimRate };
 stage.renderer.setAnimationLoop(frame);

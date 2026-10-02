@@ -104,9 +104,9 @@ export function createFlannelMaterial(baseColor, normal) {
     normalScale: new THREE.Vector2(0.8, 0.8),
     roughness: 0.9,
     metalness: 0,
-    sheen: 1,
-    sheenRoughness: 0.55,
-    sheenColor: new THREE.Color(0.32, 0.16, 0.15),
+    sheen: 0.6,
+    sheenRoughness: 0.6,
+    sheenColor: new THREE.Color(0.18, 0.09, 0.085),
     side: THREE.DoubleSide,
   });
 }

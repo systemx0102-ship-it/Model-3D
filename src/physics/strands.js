@@ -55,7 +55,6 @@ export class StrandSim {
     this.wind = [0, 0, 0];
     this.turbulence = 0.35;
     this.time = 0;
-    this.neighbors = [];
     this.stiffnessScale = 1;
     this.dampingScale = 1;
 
@@ -89,6 +88,20 @@ export class StrandSim {
       this.restLocal.set(g.rest, gi * N * 3);
     });
     this.computeRestFrames();
+    // stiffness / damping are authored as per-step fractions at 120 Hz; keep the originals so the
+    // solver can run at another fixed rate with equivalent behaviour (see setDt)
+    this.k120 = { global: this.k.global.slice(), bend: this.k.bend.slice(), damp: this.k.damp.slice() };
+    this.setDt(dt);
+  }
+
+  /** Changes the fixed step, converting per-step fractions: k' = 1 - (1 - k)^(dt * 120). */
+  setDt(dt) {
+    this.dt = dt;
+    const e = dt * 120;
+    for (const key of ['global', 'bend', 'damp']) {
+      const src = this.k120[key], dst = this.k[key];
+      for (let i = 0; i < src.length; i++) dst[i] = 1 - Math.pow(Math.max(0, 1 - Math.min(1, src[i])), e);
+    }
   }
 
   /** Rest direction of each segment expressed in its parent segment's frame. */
@@ -121,7 +134,8 @@ export class StrandSim {
   }
 
   /**
-   * Advance one fixed step.
+   * Advance one fixed step. Allocation-free inner loops: rest positions are transformed once per
+   * step, colliders are flattened and culled per guide against the guide's bounding box.
    * @param head   head transform at the END of this step: 16-float column-major matrix
    * @param colliders [{type:'sphere', c:[x,y,z], r} | {type:'capsule', a, b, r}] at the end of the step
    */
@@ -136,11 +150,21 @@ export class StrandSim {
       return;
     }
     this.time += dt;
-    const dt2 = dt * dt;
     const wind = this.wind;
+    const M = head;
+    // rest pose in world, once per step
+    const rw = (this._restWorld ??= new Float32Array(G * N * 3));
+    const rl = this.restLocal;
+    for (let i = 0, n = G * N * 3; i < n; i += 3) {
+      const x = rl[i], y = rl[i + 1], z = rl[i + 2];
+      rw[i] = M[0] * x + M[4] * y + M[8] * z + M[12];
+      rw[i + 1] = M[1] * x + M[5] * y + M[9] * z + M[13];
+      rw[i + 2] = M[2] * x + M[6] * y + M[10] * z + M[14];
+    }
     // inertia scale: move particles with a fraction (1 - inertia) of the head's rigid motion,
     // which tames whip-cracking on violent turns while keeping natural lag
-    const headDelta = mulMat(head, invRigid(lastHead));
+    const D = mulMat(head, invRigid(lastHead));
+    const KD = this.k.damp, ds = this.dampingScale;
     for (let g = 0; g < G; g++) {
       const li = this.guideInertia[g * 2], ai = this.guideInertia[g * 2 + 1];
       const carry = 1 - Math.min(li, ai);
@@ -149,105 +173,195 @@ export class StrandSim {
       const ph = this.phase[g];
       // gusty wind: smooth noise in time, phase-shifted per guide (different timing/amplitude)
       const gust = 1 + this.turbulence * (Math.sin(this.time * 1.7 + ph) * 0.6 + Math.sin(this.time * 4.3 + ph * 1.3) * 0.4);
+      const wx = wind[0] * gust, wy = wind[1] * gust, wz = wind[2] * gust;
       for (let i = 1; i < N; i++) {
         const o = (g * N + i) * 3;
         if (carry > 0) {
-          const a = xform(headDelta, pos[o], pos[o + 1], pos[o + 2]);
-          const b = xform(headDelta, prev[o], prev[o + 1], prev[o + 2]);
-          for (let k = 0; k < 3; k++) {
-            pos[o + k] += (a[k] - pos[o + k]) * carry;
-            prev[o + k] += (b[k] - prev[o + k]) * carry;
-          }
+          let x = pos[o], y = pos[o + 1], z = pos[o + 2];
+          pos[o] += (D[0] * x + D[4] * y + D[8] * z + D[12] - x) * carry;
+          pos[o + 1] += (D[1] * x + D[5] * y + D[9] * z + D[13] - y) * carry;
+          pos[o + 2] += (D[2] * x + D[6] * y + D[10] * z + D[14] - z) * carry;
+          x = prev[o]; y = prev[o + 1]; z = prev[o + 2];
+          prev[o] += (D[0] * x + D[4] * y + D[8] * z + D[12] - x) * carry;
+          prev[o + 1] += (D[1] * x + D[5] * y + D[9] * z + D[13] - y) * carry;
+          prev[o + 2] += (D[2] * x + D[6] * y + D[10] * z + D[14] - z) * carry;
         }
-        const damp = Math.min(0.95, this.k.damp[g * N + i] * this.dampingScale);
-        for (let k = 0; k < 3; k++) {
-          const v = (pos[o + k] - prev[o + k]) / dt;
-          // drag toward the moving air: a = drag * (wind - v)
-          let acc = drag * (wind[k] * gust - v);
-          if (k === 1) acc += grav;
-          let vn = v * (1 - damp) + acc * dt;
-          const max = 12; // m/s clamp: prevents explosions from bad frames
-          if (vn > max) vn = max; else if (vn < -max) vn = -max;
-          prev[o + k] = pos[o + k];
-          pos[o + k] += vn * dt;
+        const damp = 1 - Math.min(0.95, KD[g * N + i] * ds);
+        let vx = ((pos[o] - prev[o]) / dt) * damp + drag * (wx - (pos[o] - prev[o]) / dt) * dt;
+        let vy = ((pos[o + 1] - prev[o + 1]) / dt) * damp + (drag * (wy - (pos[o + 1] - prev[o + 1]) / dt) + grav) * dt;
+        let vz = ((pos[o + 2] - prev[o + 2]) / dt) * damp + drag * (wz - (pos[o + 2] - prev[o + 2]) / dt) * dt;
+        // m/s clamp: prevents explosions from bad frames
+        vx = vx > 12 ? 12 : vx < -12 ? -12 : vx;
+        vy = vy > 12 ? 12 : vy < -12 ? -12 : vy;
+        vz = vz > 12 ? 12 : vz < -12 ? -12 : vz;
+        prev[o] = pos[o]; prev[o + 1] = pos[o + 1]; prev[o + 2] = pos[o + 2];
+        pos[o] += vx * dt; pos[o + 1] += vy * dt; pos[o + 2] += vz * dt;
+      }
+      // root follows the head exactly
+      const o = g * N * 3;
+      pos[o] = prev[o] = rw[o]; pos[o + 1] = prev[o + 1] = rw[o + 1]; pos[o + 2] = prev[o + 2] = rw[o + 2];
+    }
+    // flattened colliders and per-guide candidate lists (bounding box test)
+    const C = colliders.length;
+    const cf = (this._cf = this._cf?.length >= C * 9 ? this._cf : new Float32Array(Math.max(16, C) * 9));
+    for (let j = 0; j < C; j++) {
+      const c = colliders[j], q = j * 9;
+      if (c.type === 'sphere') (cf[q] = 0), (cf[q + 1] = c.c[0]), (cf[q + 2] = c.c[1]), (cf[q + 3] = c.c[2]), (cf[q + 4] = c.c[0]), (cf[q + 5] = c.c[1]), (cf[q + 6] = c.c[2]);
+      else (cf[q] = 1), (cf[q + 1] = c.a[0]), (cf[q + 2] = c.a[1]), (cf[q + 3] = c.a[2]), (cf[q + 4] = c.b[0]), (cf[q + 5] = c.b[1]), (cf[q + 6] = c.b[2]);
+      cf[q + 7] = c.r;
+      cf[q + 8] = c.friction ?? 0.3;
+    }
+    // candidates per chunk of CH particles along each guide (tight boxes -> few colliders each)
+    const CH = 8, nCh = Math.ceil(N / CH);
+    const cand = (this._cand = this._cand?.length >= G * nCh * C ? this._cand : new Int32Array(Math.max(1, G * nCh * C)));
+    const candN = (this._candN = this._candN?.length >= G * nCh ? this._candN : new Int32Array(G * nCh));
+    for (let g = 0; g < G; g++) {
+      const m = this.guideRadius[g] + 0.025; // margin: constraint moves within the step
+      for (let ch = 0; ch < nCh; ch++) {
+        let x0 = Infinity, y0 = Infinity, z0 = Infinity, x1 = -Infinity, y1 = -Infinity, z1 = -Infinity;
+        const i1 = Math.min(N, (ch + 1) * CH);
+        for (let i = ch * CH; i < i1; i++) {
+          const o = (g * N + i) * 3;
+          const x = pos[o], y = pos[o + 1], z = pos[o + 2];
+          if (x < x0) x0 = x; if (x > x1) x1 = x;
+          if (y < y0) y0 = y; if (y > y1) y1 = y;
+          if (z < z0) z0 = z; if (z > z1) z1 = z;
         }
+        let k = 0;
+        const base = (g * nCh + ch) * C;
+        for (let j = 0; j < C; j++) {
+          const q = j * 9, r = cf[q + 7] + m;
+          if (Math.min(cf[q + 1], cf[q + 4]) - r > x1 || Math.max(cf[q + 1], cf[q + 4]) + r < x0) continue;
+          if (Math.min(cf[q + 2], cf[q + 5]) - r > y1 || Math.max(cf[q + 2], cf[q + 5]) + r < y0) continue;
+          if (Math.min(cf[q + 3], cf[q + 6]) - r > z1 || Math.max(cf[q + 3], cf[q + 6]) + r < z0) continue;
+          cand[base + k++] = j;
+        }
+        candN[g * nCh + ch] = k;
       }
     }
-    void dt2;
-    // roots follow the head exactly
-    for (let g = 0; g < G; g++) {
-      const o = g * N * 3;
-      const r = xform(head, this.restLocal[o], this.restLocal[o + 1], this.restLocal[o + 2]);
-      pos.set(r, o);
-      prev.set(r, o);
-    }
-    const headRot = rotOf(head);
-    const q = [0, 0, 0, 1];
-    for (let it = 0; it < this.iterations; it++) {
+    // head rotation as a quaternion (root segment bending reference = head +Y)
+    const hq = rotOf(head);
+    const hux = 2 * (hq[0] * hq[1] - hq[3] * hq[2]), huy = 1 - 2 * (hq[0] * hq[0] + hq[2] * hq[2]), huz = 2 * (hq[1] * hq[2] + hq[3] * hq[0]);
+    const iters = this.iterations;
+    const rd = this.restDirLocal;
+    const KG = this.k.global, KB = this.k.bend, RL = this.restLen, GR = this.guideRadius, ss = this.stiffnessScale;
+    for (let it = 0; it < iters; it++) {
       for (let g = 0; g < G; g++) {
         for (let i = 1; i < N; i++) {
           const o = (g * N + i) * 3, p = o - 3;
           const gi = g * N + i;
           // global shape: attraction toward the rest pose (in world via the head transform)
-          const kg = Math.min(1, this.k.global[gi] * this.stiffnessScale) / this.iterations;
+          const kg = Math.min(1, KG[gi] * ss) / iters;
           if (kg > 0) {
-            const rw = xform(head, this.restLocal[o], this.restLocal[o + 1], this.restLocal[o + 2]);
-            for (let k = 0; k < 3; k++) pos[o + k] += (rw[k] - pos[o + k]) * kg;
+            pos[o] += (rw[o] - pos[o]) * kg; pos[o + 1] += (rw[o + 1] - pos[o + 1]) * kg; pos[o + 2] += (rw[o + 2] - pos[o + 2]) * kg;
           }
           // local bending: rest direction relative to the current parent segment
-          const kb = Math.min(1, this.k.bend[gi] * this.stiffnessScale) / this.iterations;
+          const kb = Math.min(1, KB[gi] * ss) / iters;
           if (kb > 0) {
-            let parent;
-            if (i === 1) parent = qrot(headRot, [0, 1, 0]);
-            else parent = norm([pos[p] - pos[p - 3], pos[p + 1] - pos[p - 2], pos[p + 2] - pos[p - 1]]);
-            arcQuat([0, 1, 0], parent, q);
-            const d = qrot(q, [this.restDirLocal[o], this.restDirLocal[o + 1], this.restDirLocal[o + 2]]);
-            const L = this.restLen[gi];
-            for (let k = 0; k < 3; k++) pos[o + k] += (pos[p + k] + d[k] * L - pos[o + k]) * kb;
+            let px, py, pz;
+            if (i === 1) (px = hux), (py = huy), (pz = huz);
+            else {
+              px = pos[p] - pos[p - 3]; py = pos[p + 1] - pos[p - 2]; pz = pos[p + 2] - pos[p - 1];
+              const l = Math.sqrt(px * px + py * py + pz * pz) || 1;
+              px /= l; py /= l; pz /= l;
+            }
+            // shortest rotation +Y -> parent applied to the rest direction (Rodrigues form of the
+            // half-way quaternion: no normalisation needed; k = Y x p, c = Y . p)
+            const vx = rd[o], vy = rd[o + 1], vz = rd[o + 2];
+            let dx, dy, dz;
+            if (py > -0.9999) {
+              const f = (pz * vx - px * vz) / (1 + py);
+              dx = vx * py + px * vy + pz * f;
+              dy = vy * py - px * vx - pz * vz;
+              dz = vz * py + pz * vy - px * f;
+            } else (dx = -vx), (dy = -vy), (dz = vz);
+            const L = RL[gi];
+            pos[o] += (pos[p] + dx * L - pos[o]) * kb;
+            pos[o + 1] += (pos[p + 1] + dy * L - pos[o + 1]) * kb;
+            pos[o + 2] += (pos[p + 2] + dz * L - pos[o + 2]) * kb;
           }
         }
-        // collisions (with friction against the previous position)
-        const rad = this.guideRadius[g];
-        for (let i = 1; i < N; i++) {
+        // collisions (with friction against the previous position), culled candidates only,
+        const rad = GR[g];
+        // (resolved on the final pass: earlier passes only shape the strand)
+        if (it === iters - 1) for (let i = 1; i < N; i++) {
+          const ci = g * nCh + ((i / CH) | 0), nc = candN[ci], base = ci * C;
           const o = (g * N + i) * 3;
-          for (const c of colliders) collide(c, pos, prev, o, rad);
+          for (let k = 0; k < nc; k++) collideFlat(cf, cand[base + k] * 9, pos, prev, o, rad);
         }
         // follow-the-leader inextensibility with velocity correction
         for (let i = 1; i < N; i++) {
           const o = (g * N + i) * 3, p = o - 3;
-          const L = this.restLen[g * N + i];
-          let dx = pos[o] - pos[p], dy = pos[o + 1] - pos[p + 1], dz = pos[o + 2] - pos[p + 2];
-          const d = Math.hypot(dx, dy, dz) || 1e-9;
+          const L = RL[g * N + i];
+          const dx = pos[o] - pos[p], dy = pos[o + 1] - pos[p + 1], dz = pos[o + 2] - pos[p + 2];
+          const d = Math.sqrt(dx * dx + dy * dy + dz * dz) || 1e-9;
           const s = L / d;
           const nx = pos[p] + dx * s, ny = pos[p + 1] + dy * s, nz = pos[p + 2] + dz * s;
           const cx = nx - pos[o], cy = ny - pos[o + 1], cz = nz - pos[o + 2];
           pos[o] = nx; pos[o + 1] = ny; pos[o + 2] = nz;
-          // DFTL: feed the correction back to the parent's velocity (0.9) to cancel ghost momentum
+          // DFTL: feed the correction back to the parent's velocity to cancel ghost momentum
           if (i > 1) {
-            prev[p] -= -cx * 0.45; prev[p + 1] -= -cy * 0.45; prev[p + 2] -= -cz * 0.45;
+            prev[p] += cx * 0.45; prev[p + 1] += cy * 0.45; prev[p + 2] += cz * 0.45;
           }
         }
       }
-      this.repel();
+      if (it === iters - 1) this.repel();
     }
     this.lastHead = head.slice();
+  }
+
+  /** Guide pairs [a, b, minDistance] for volume preservation (stored flat for speed). */
+  set neighbors(list) {
+    this._nbA = Int32Array.from(list.map((x) => x[0]));
+    this._nbB = Int32Array.from(list.map((x) => x[1]));
+    this._nbD = Float32Array.from(list.map((x) => x[2]));
+    this._nb = list;
+  }
+  get neighbors() {
+    return this._nb ?? [];
   }
 
   /** Cheap volume preservation: neighbouring guides keep a minimum spacing at the same index. */
   repel() {
     const { pos, N } = this;
-    for (const [a, b, minD] of this.neighbors) {
+    const A = this._nbA, B = this._nbB, Dm = this._nbD;
+    if (!A) return;
+    for (let k = 0; k < A.length; k++) {
+      const a = A[k], b = B[k], minD = Dm[k], md2 = minD * minD;
       for (let i = 4; i < N; i += 2) {
         const oa = (a * N + i) * 3, ob = (b * N + i) * 3;
         const dx = pos[ob] - pos[oa], dy = pos[ob + 1] - pos[oa + 1], dz = pos[ob + 2] - pos[oa + 2];
-        const d = Math.hypot(dx, dy, dz);
-        if (d >= minD || d < 1e-6) continue;
+        const d2 = dx * dx + dy * dy + dz * dz;
+        if (d2 >= md2 || d2 < 1e-12) continue;
+        const d = Math.sqrt(d2);
         const f = ((minD - d) / d) * 0.15;
         pos[oa] -= dx * f; pos[oa + 1] -= dy * f; pos[oa + 2] -= dz * f;
         pos[ob] += dx * f; pos[ob + 1] += dy * f; pos[ob + 2] += dz * f;
       }
     }
   }
+}
+
+function collideFlat(cf, q, pos, prev, o, rad) {
+  let cx, cy, cz;
+  if (cf[q] === 0) (cx = cf[q + 1]), (cy = cf[q + 2]), (cz = cf[q + 3]);
+  else {
+    const ax = cf[q + 1], ay = cf[q + 2], az = cf[q + 3];
+    const bx = cf[q + 4] - ax, by = cf[q + 5] - ay, bz = cf[q + 6] - az;
+    const t = Math.max(0, Math.min(1, ((pos[o] - ax) * bx + (pos[o + 1] - ay) * by + (pos[o + 2] - az) * bz) / (bx * bx + by * by + bz * bz)));
+    cx = ax + bx * t; cy = ay + by * t; cz = az + bz * t;
+  }
+  const dx = pos[o] - cx, dy = pos[o + 1] - cy, dz = pos[o + 2] - cz;
+  const R = cf[q + 7] + rad;
+  const d2 = dx * dx + dy * dy + dz * dz;
+  if (d2 >= R * R) return;
+  const d = Math.sqrt(d2) || 1e-6;
+  const nx = dx / d, ny = dy / d, nz = dz / d;
+  pos[o] = cx + nx * R; pos[o + 1] = cy + ny * R; pos[o + 2] = cz + nz * R;
+  const vx = pos[o] - prev[o], vy = pos[o + 1] - prev[o + 1], vz = pos[o + 2] - prev[o + 2];
+  const vn = vx * nx + vy * ny + vz * nz;
+  const f = cf[q + 8];
+  prev[o] += (vx - vn * nx) * f; prev[o + 1] += (vy - vn * ny) * f; prev[o + 2] += (vz - vn * nz) * f;
 }
 
 function collide(c, pos, prev, o, rad) {

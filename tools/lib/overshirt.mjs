@@ -177,7 +177,7 @@ function tieMesh({ radiusAt, at, yTie, thStart, rnd, knot }) {
 /** Plaid flannel: burgundy / charcoal tartan with fine cream lines, 2/2 twill, brushed fuzz. */
 export async function bakeFlannel(dir, N = 1024, formats = ['webp']) {
   // stripe sequence across one repeat (mm, colour index), mirrored like a real sett
-  const C = [[0.32, 0.045, 0.05], [0.055, 0.05, 0.05], [0.72, 0.62, 0.48], [0.16, 0.035, 0.04]];
+  const C = [[0.19, 0.024, 0.028], [0.028, 0.026, 0.028], [0.48, 0.41, 0.31], [0.085, 0.018, 0.022]];
   const raw = [[0, 26], [1, 18], [3, 4], [2, 1.2], [3, 4], [1, 6], [0, 6]];
   const rawHalf = raw.reduce((s, [, w]) => s + w, 0);
   const half = (FLANNEL_TILE * 1000) / 2; // one mirrored sett per tile: seamless repeat
