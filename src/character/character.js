@@ -4,7 +4,7 @@ import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { createSkinMaterial } from '../render/skin.js';
 import { createEyeMaterial, updateEyeUniforms } from '../render/eye.js';
-import { createStrandMaterial, createTeethMaterial, createMouthMaterial, createTearlineMaterial } from '../render/materials.js';
+import { createStrandMaterial, createTeethMaterial, createMouthMaterial, createTearlineMaterial, mouthOcclusion } from '../render/materials.js';
 import { createClothMaterial, createFlannelMaterial } from '../render/cloth.js';
 
 const SHEEN = {
@@ -109,6 +109,10 @@ export class Character {
           mesh.renderOrder = 2;
           break;
         case 'teeth':
+          if (mesh.name === 'SK_Teeth_Upper') {
+            mesh.geometry.computeBoundingBox();
+            mouthOcclusion.frontZ.value = mesh.geometry.boundingBox.max.z;
+          }
           mesh.material = createTeethMaterial();
           mesh.castShadow = false;
           break;
@@ -179,6 +183,7 @@ export class Character {
 
   /** Per-frame material state that depends on the posed skeleton. */
   updateMaterials() {
+    mouthOcclusion.open.value = this.weights.jawOpen ?? 0;
     for (const e of this.eyes) {
       updateEyeUniforms(e.mesh, e.bone, e.radius, e.bindFrame);
       const u = e.mesh.material.userData.uniforms;

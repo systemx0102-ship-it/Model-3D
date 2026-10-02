@@ -90,6 +90,7 @@ const mode = { autopilot: !params.has('manual') };
 const wind = new THREE.Vector3(+(params.get('wind') ?? 0), 0, 0);
 const forcedExpr = params.get('expr');
 if (forcedExpr) animator.face.setExpression(forcedExpr);
+if (params.has('say')) animator.face.speak(params.get('say'));
 const scripted = params.get('anim'); // deterministic test inputs: idle|walk|jog|run|sprint|crouch|turn
 
 function scriptedInput(t) {

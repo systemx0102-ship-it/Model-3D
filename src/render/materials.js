@@ -31,27 +31,51 @@ diffuseColor.a = ( 1.0 - smoothstep( 0.7, 1.0, vStrandUv.y ) ) * ( 1.0 - smooths
   return mat;
 }
 
+/**
+ * Shared oral-cavity occlusion: light reaching teeth, gums and tongue falls off with depth behind
+ * the incisors (bind space, so it holds while the jaw moves) and opens up as the jaw drops.
+ */
+export const mouthOcclusion = { frontZ: { value: 0 }, open: { value: 0 } };
+
+function withMouthOcclusion(mat, strength = 1, tint = [1, 1, 1]) {
+  mat.onBeforeCompile = (sh) => {
+    sh.uniforms.mouthFrontZ = mouthOcclusion.frontZ;
+    sh.uniforms.mouthOpen = mouthOcclusion.open;
+    sh.vertexShader = sh.vertexShader
+      .replace('#include <common>', '#include <common>\nuniform float mouthFrontZ;\nvarying float vMouthDepth;')
+      .replace('#include <begin_vertex>', '#include <begin_vertex>\nvMouthDepth = mouthFrontZ - position.z;');
+    sh.fragmentShader = sh.fragmentShader
+      .replace('#include <common>', '#include <common>\nuniform float mouthOpen;\nvarying float vMouthDepth;')
+      .replace('#include <opaque_fragment>', `float occ = mix(0.46, 0.1, smoothstep(0.0, 0.035, vMouthDepth));
+occ = mix(occ, 0.78, ${(0.4 * strength).toFixed(2)} * smoothstep(0.05, 0.6, mouthOpen) * (1.0 - smoothstep(0.02, 0.05, vMouthDepth)));
+outgoingLight *= occ * vec3(${tint.map((x) => x.toFixed(3)).join(', ')});
+#include <opaque_fragment>`);
+  };
+  mat.customProgramCacheKey = () => `mouth-occ-${strength}`;
+  return mat;
+}
+
 export function createTeethMaterial() {
-  return new THREE.MeshPhysicalMaterial({
+  return withMouthOcclusion(new THREE.MeshPhysicalMaterial({
     vertexColors: true,
-    roughness: 0.22,
-    clearcoat: 0.6,
-    clearcoatRoughness: 0.12,
+    roughness: 0.25,
+    clearcoat: 0.3,
+    clearcoatRoughness: 0.15,
     ior: 1.62,
     specularIntensity: 0.7,
-    sheen: 0.3,
-    sheenColor: new THREE.Color(0.85, 0.88, 0.95),
-    sheenRoughness: 0.4,
-  });
+    sheen: 0.12,
+    sheenColor: new THREE.Color(0.9, 0.86, 0.78),
+    sheenRoughness: 0.45,
+  }), 1, [1, 0.93, 0.82]);
 }
 
 export function createMouthMaterial() {
-  return new THREE.MeshPhysicalMaterial({
+  return withMouthOcclusion(new THREE.MeshPhysicalMaterial({
     vertexColors: true,
     roughness: 0.45,
     clearcoat: 0.7,
     clearcoatRoughness: 0.18,
-  });
+  }), 0.8);
 }
 
 /** Lacrimal meniscus: a transparent wet film catching sharp highlights along the lid margin. */
