@@ -23,6 +23,9 @@ import { V, VCOUNT } from './lib/skinbake.mjs';
 import { skinContext } from './lib/landmarks.mjs';
 import { bakeEye } from './lib/eyebake.mjs';
 import { bakeMicroNormal } from './lib/micro.mjs';
+import { fitColliders, bindPoseColliders } from './lib/colliders.mjs';
+import { buildGroom } from './lib/groom.mjs';
+import { scalp as scalpInfo } from '../character/hairline.mjs';
 import { recipe } from '../character/recipe.mjs';
 
 const args = process.argv.slice(2);
@@ -368,13 +371,65 @@ const lashes = strandMesh(lashStrands);
 const brows = strandMesh(browStrands);
 log(`face hair: ${lashStrands.length} lashes, ${browStrands.length} brow hairs`);
 
+// 10b. Body colliders + hair groom ----------------------------------------------------------
+const vattr = regionMasks(MH, world.length / 3);
+const dominant = (v) => {
+  let best = null, bw = -1;
+  for (const [b, w] of perVertex[v] ?? []) if (w > bw) (bw = w), (best = b);
+  return best;
+};
+const eyeMidW = eyes.l.center.clone().add(eyes.r.center).multiplyScalar(0.5);
+const scalpVerts = [...new Set(packed.parts.head.faces.flatMap((f) => f.v))].filter((v) => scalpInfo([world[v * 3] - eyeMidW.x, world[v * 3 + 1] - eyeMidW.y, world[v * 3 + 2] - eyeMidW.z], vattr[v * VCOUNT + V.EAR]).scalp > 0.6);
+const colliders = fitColliders({ rig, world, verts: bodyVerts, dominant, eyes, scalpVerts, bodyTris });
+log(`colliders: ${colliders.length} (${colliders.filter((c) => c.type === 'sphere').length} spheres)`);
+const earMask = Float32Array.from({ length: world.length / 3 }, (_, v) => vattr[v * VCOUNT + V.EAR]);
+const groom = buildGroom({ world, headTris: headSet.t, normals: restNormals, earMask, eyes, colliders: bindPoseColliders(colliders, 0.003), rng: random });
+log(`hair: ${groom.guides.length} guides x ${groom.NP} points, ${groom.strands.guides.length / 3} render strands, ${groom.baby.length} baby hairs`);
+const babyHair = strandMesh(groom.baby);
+{
+  // guides in head-bone local space; strand interpolation tables
+  const headInv = rig.byName.get('head').world.clone().invert();
+  const G = groom.guides.length, NP = groom.NP;
+  const rest = new Float32Array(G * NP * 3);
+  const v = new THREE.Vector3();
+  groom.guides.forEach((g, gi) => {
+    for (let k = 0; k < NP; k++) {
+      v.fromArray(g.rest, k * 3).applyMatrix4(headInv);
+      rest.set(v.toArray(), (gi * NP + k) * 3);
+    }
+  });
+  const arrays = { guideRest: rest, ...groom.strands };
+  const layout = {};
+  let offset = 0;
+  const chunks = [];
+  for (const [name, arr] of Object.entries(arrays)) {
+    layout[name] = { offset, length: arr.length };
+    chunks.push(Buffer.from(arr.buffer, arr.byteOffset, arr.byteLength));
+    offset += arr.byteLength;
+  }
+  fs.writeFileSync(path.join(OUT, 'hair.bin'), Buffer.concat(chunks));
+  var hairMeta = {
+    file: 'hair.bin', layout, guides: G, points: NP, strands: groom.strands.guides.length / 3,
+    zones: groom.guides.map((g) => g.zone), lengths: groom.guides.map((g) => +g.length.toFixed(4)),
+    neighbors: (() => {
+      // guide adjacency for volume preservation (pairs within 2.2 cm at the root)
+      const out = [];
+      for (let a = 0; a < G; a++)
+        for (let b = a + 1; b < G; b++) {
+          const d = groom.guides[a].root.p.distanceTo(groom.guides[b].root.p);
+          if (d < 0.022) out.push([a, b, +Math.max(0.006, d * 0.7).toFixed(4)]);
+        }
+      return out;
+    })(),
+  };
+}
+
 // Skin textures -------------------------------------------------------------------------
 const TEXDIR = path.join(OUT, 'textures');
 fs.mkdirSync(TEXDIR, { recursive: true });
 const textureFiles = {};
 if (!SKIP_TEX) {
   const nV = world.length / 3;
-  const vattr = regionMasks(MH, nV);
   const adjacency = new Map();
   for (const f of bodyFaces)
     for (let i = 0; i < f.v.length; i++) {
@@ -443,6 +498,7 @@ const M = {
   gum: g.material('M_Gums', { color: [0.78, 0.36, 0.38, 1], roughness: 0.35, extras: { shader: 'mouth' } }),
   tongue: g.material('M_Tongue', { color: [0.72, 0.36, 0.38, 1], roughness: 0.4, extras: { shader: 'mouth' } }),
   lash: g.material('M_Eyelashes', { color: [0.04, 0.03, 0.025, 1], roughness: 0.5, alphaMode: 'MASK', alphaCutoff: 0.3, doubleSided: true, extras: { shader: 'strand' } }),
+  baby: g.material('M_BabyHair', { color: [0.06, 0.04, 0.025, 1], roughness: 0.6, alphaMode: 'MASK', alphaCutoff: 0.3, doubleSided: true, extras: { shader: 'strand' } }),
   brow: g.material('M_Eyebrows', { color: [0.11, 0.075, 0.05, 1], roughness: 0.55, alphaMode: 'MASK', alphaCutoff: 0.3, doubleSided: true, extras: { shader: 'strand' } }),
 };
 for (const m of bodyParts) g.addMesh({ name: `SK_Body_${TILE_NAMES[m.tile]}`, ...m, material: M.skin[m.tile] });
@@ -457,6 +513,7 @@ g.addMesh({ name: 'SK_Gums_Lower', ...gumLower, material: M.gum });
 g.addMesh({ name: 'SK_Tongue', ...tongue, material: M.tongue });
 g.addMesh({ name: 'SK_Eyelashes', ...lashes, material: M.lash });
 g.addMesh({ name: 'SK_Eyebrows', ...brows, material: M.brow });
+g.addMesh({ name: 'SK_BabyHair', ...babyHair, material: M.baby });
 fs.writeFileSync(path.join(OUT, 'hero.glb'), await g.write());
 
 const sidecar = {
@@ -469,6 +526,8 @@ const sidecar = {
   eyes: Object.fromEntries(Object.entries(eyes).map(([s, e]) => [s, { center: e.center.toArray(), gaze: e.gaze.toArray(), radius: e.R, ...EYE }])),
   bones: rig.bones.map((b) => ({ name: b.name, parent: b.parent, role: b.role, head: b.head.toArray(), tail: b.tail.toArray() })),
   textures: textureFiles,
+  hair: hairMeta,
+  colliders: colliders.map(({ world: _w, ...c }) => c),
   textureSize: TEX,
   recipe: { macro: recipe.macro, targets: applied },
 };
